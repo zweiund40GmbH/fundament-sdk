@@ -38,6 +38,8 @@ Planned as 0.4.0 for both crates.
   - `telemetry` (feature): `TelemetryConfig` (`<PREFIX>_LOG`, falling back to `RUST_LOG`, then `info`;
     `<PREFIX>_LOG_FORMAT` = `json` | `text`) and an idempotent `init` returning `InitOutcome` (`Installed`,
     `InstalledWithoutLog`, `AlreadyInstalled`).
+- Both crates share one exact requirement in `[workspace.dependencies]`; `just versions` checks it equals the
+  workspace version.
 - `docs/configuration.md` gains a generated section for `z40-fundament-http`.
 - The release workflow publishes `z40-fundament-http` after `z40-fundament` and skips a crate whose version is
   already on crates.io.

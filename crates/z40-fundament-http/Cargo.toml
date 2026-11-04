@@ -33,7 +33,7 @@ tower = { version = "0.5.2", default-features = false }
 # Always on: the one-time warning of `ClientIp` without `ConnectInfo`.
 tracing = "0.1.41"
 # One configuration system for both crates (`Lookup`, `ConfigVar`, `ConfigError`).
-z40-fundament = { version = "0.3.0", path = "../z40-fundament", default-features = false }
+z40-fundament = { workspace = true }
 
 tower-http = { version = "0.7.1", optional = true, default-features = false }
 # Without its own `tracing-log` feature: `init` installs the `log` bridge itself to tell the outcomes apart.
@@ -47,7 +47,7 @@ tokio = { version = "1.45.0", features = ["macros", "rt"] }
 tower = { version = "0.5.2", features = ["util"] }
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt", "std"] }
 # Only for the example that wires the client address into the status endpoint.
-z40-fundament = { version = "0.3.0", path = "../z40-fundament", features = ["status"] }
+z40-fundament = { workspace = true, features = ["status"] }
 
 [package.metadata.docs.rs]
 all-features = true

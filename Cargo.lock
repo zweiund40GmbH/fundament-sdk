@@ -2306,7 +2306,7 @@ dependencies = [
 
 [[package]]
 name = "z40-fundament"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "chrono",
@@ -2324,7 +2324,7 @@ dependencies = [
 
 [[package]]
 name = "z40-fundament-http"
-version = "0.3.0"
+version = "0.4.0"
 dependencies = [
  "axum",
  "serde_json",

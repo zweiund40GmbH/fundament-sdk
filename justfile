@@ -6,7 +6,7 @@ crates := "z40-fundament z40-fundament-http"
 msrv := "1.94"
 
 # Full quality gate: format, lint (every feature alone and all together), tests, docs, file sizes, MSRV.
-check: fmt clippy test doc lines msrv
+check: fmt versions clippy test doc lines msrv
 
 # Formatting check.
 fmt:
@@ -15,6 +15,18 @@ fmt:
 # Features of a crate (from its manifest, without `default`).
 features crate:
     @awk '/^\[features\]/{f=1;next} /^\[/{f=0} f && /^[a-z]/{print $1}' crates/{{crate}}/Cargo.toml | grep -vx default || true
+
+# The workspace's own requirement on z40-fundament (`[workspace.dependencies]`) must be `=<version>`.
+versions:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
+    required="$(sed -n 's/^z40-fundament = { version = "\([^"]*\)".*/\1/p' Cargo.toml)"
+    if [ "$required" != "=$version" ]; then
+        echo "error: [workspace.dependencies] z40-fundament is \"$required\", expected \"=$version\""
+        exit 1
+    fi
+    echo "versions: z40-fundament requirement =$version"
 
 # Clippy with warnings as errors, per crate: no features, each feature alone; then all features.
 clippy:

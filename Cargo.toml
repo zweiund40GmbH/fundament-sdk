@@ -3,12 +3,17 @@ resolver = "3"
 members = ["crates/z40-fundament", "crates/z40-fundament-http"]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.94"
 license = "MIT OR Apache-2.0"
 authors = ["zweiund40 GmbH"]
 repository = "https://github.com/zweiund40GmbH/fundament-sdk"
+
+# Crates of this workspace used by other members. The requirement is exact and must equal the workspace
+# version (`just versions` checks it): both crates are released together.
+[workspace.dependencies]
+z40-fundament = { version = "=0.4.0", path = "crates/z40-fundament", default-features = false }
 
 [workspace.lints.rust]
 missing_docs = "deny"

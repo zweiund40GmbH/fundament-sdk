@@ -60,8 +60,9 @@ The toolchain for development is pinned in `rust-toolchain.toml`; the minimum su
 
 1. Move the *Unreleased* entries in `CHANGELOG.md` to a new version section and bump `version` in the
    workspace `Cargo.toml` (SemVer; before `1.0` a breaking change bumps the minor version). Both crates share
-   the version: bump the `z40-fundament` requirement in `crates/z40-fundament-http/Cargo.toml` (dependency
-   and dev-dependency) to the same version.
+   the version: set the `z40-fundament` requirement in `[workspace.dependencies]` of the workspace
+   `Cargo.toml` to the same version, exactly (`=X.Y.Z`); `just versions` (part of `just check`) fails
+   otherwise.
 2. Merge to `main`, then tag the commit `vX.Y.Z` and push the tag.
 3. The `release` workflow checks that the tag is on `main` and matches the version, runs the gate,
    publishes `z40-fundament` and then `z40-fundament-http` to crates.io (a crate whose version is already

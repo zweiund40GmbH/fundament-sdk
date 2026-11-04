@@ -46,6 +46,7 @@ jobs:
         with:
           tool: just,cargo-hack
       - run: just fmt
+      - run: just versions
       - run: just clippy
       - run: just doc
       - run: just lines
