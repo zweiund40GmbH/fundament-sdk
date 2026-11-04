@@ -20,6 +20,12 @@ default = []
 # Static service keys: verify incoming bearer keys against a `name=sha256hex` list, failure brake,
 # outgoing bearer key.
 credentials = ["dep:sha2", "dep:subtle"]
+# Read a change feed page by page; the app provides lock, cursor and page storage via traits.
+feed-consumer = ["credentials", "dep:reqwest", "dep:tracing"]
+# Keep a local replica of feed records (version rule, tombstones, projection hook).
+replica = ["feed-consumer"]
+# Ready-made MariaDB/MySQL (sqlx) implementations of the consumer and replica traits.
+replica-mysql = ["replica", "dep:sqlx"]
 # Serve `GET /fundament/v1/status` with axum.
 status = ["credentials", "dep:axum", "dep:tokio", "dep:tracing"]
 
@@ -30,7 +36,9 @@ serde_json = "1.0.140"
 thiserror = "2.0.12"
 
 axum = { version = "0.8.4", optional = true, default-features = false, features = ["json", "tokio"] }
+reqwest = { version = "0.12.22", optional = true, default-features = false, features = ["rustls-tls"] }
 sha2 = { version = "0.10.9", optional = true }
+sqlx = { version = "0.9.0", optional = true, default-features = false, features = ["mysql", "runtime-tokio", "tls-rustls-ring-webpki", "chrono"] }
 subtle = { version = "2.6.1", optional = true }
 tokio = { version = "1.45.0", optional = true, default-features = false, features = ["time"] }
 tracing = { version = "0.1.41", optional = true }
@@ -39,6 +47,7 @@ tracing = { version = "0.1.41", optional = true }
 axum = { version = "0.8.4", default-features = false, features = ["http1", "json", "query", "tokio"] }
 tokio = { version = "1.45.0", features = ["macros", "rt-multi-thread", "net", "time"] }
 tower = { version = "0.5.2", features = ["util"] }
+sqlx = { version = "0.9.0", default-features = false, features = ["mysql", "runtime-tokio", "tls-rustls-ring-webpki", "chrono"] }
 
 
 [package.metadata.docs.rs]

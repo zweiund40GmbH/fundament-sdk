@@ -100,6 +100,16 @@ pub fn variable_table(prefix: &str, vars: &[ConfigVar]) -> String {
 pub fn reference_markdown() -> String {
     #[allow(unused_mut)]
     let mut out = String::new();
+    #[cfg(feature = "feed-consumer")]
+    {
+        out.push_str("### Feed consumer (`feed-consumer`)\n\n");
+        out.push_str("Read with `FeedConsumerConfig::from_lookup(prefix, lookup)`.\n\n");
+        out.push_str(&variable_table(
+            "<PREFIX>",
+            crate::consumer::FeedConsumerConfig::VARIABLES,
+        ));
+        out.push('\n');
+    }
     #[cfg(feature = "status")]
     {
         out.push_str("### Status endpoint (`status`)\n\n");

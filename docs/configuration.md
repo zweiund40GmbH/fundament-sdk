@@ -9,6 +9,16 @@ Values are trimmed; an empty value counts as unset. Error messages name the vari
 The tables below are generated from the code (`just config-doc`); a test fails when they are outdated.
 
 <!-- BEGIN GENERATED: just config-doc -->
+### Feed consumer (`feed-consumer`)
+
+Read with `FeedConsumerConfig::from_lookup(prefix, lookup)`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `<PREFIX>_URL` | (unset) | Origin of the source app, `https://host[:port]` without path. Unset: the feed is off. Processes that only report the status may get the URL without the key. |
+| `<PREFIX>_KEY` | (unset) | Feed key of this app at the source (sent as `Authorization: Bearer`). Unset: the feed is off. Secret: only for the process that runs the consumer. |
+| `<PREFIX>_INTERVAL_SECS` | `60` | Seconds between runs, 30–3600. Used by the app's scheduler (`slot_for`). |
+
 ### Status endpoint (`status`)
 
 Read with `StatusConfig::from_lookup(prefix, lookup)`.
