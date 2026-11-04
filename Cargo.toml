@@ -1,6 +1,6 @@
 [workspace]
 resolver = "3"
-members = ["crates/z40-fundament"]
+members = ["crates/z40-fundament", "crates/z40-fundament-http"]
 
 [workspace.package]
 version = "0.3.0"

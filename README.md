@@ -11,7 +11,9 @@ document. The wire format is described in [`docs/protocol.md`](https://github.co
 
 The Rust crate [`z40-fundament`](https://github.com/zweiund40GmbH/fundament-sdk/tree/main/crates/z40-fundament) is opt-in, like a database driver for an ORM: an app
 enables only the Cargo features it needs and connects the library to its own database through small traits.
-Ready-made MariaDB/MySQL implementations live behind their own feature.
+Ready-made MariaDB/MySQL implementations live behind their own feature. The second crate,
+[`z40-fundament-http`](https://github.com/zweiund40GmbH/fundament-sdk/tree/main/crates/z40-fundament-http), holds the HTTP groundwork of axum apps
+(request ids, trace layer, log setup, security headers, `no-store`, client address, CSRF guard).
 
 **Status:** pre-release (`0.x`). The API may still change before `1.0`.
 
@@ -30,6 +32,22 @@ Ready-made MariaDB/MySQL implementations live behind their own feature.
 | `feed-source-mysql` | `MySqlSource`: sqlx/MariaDB outbox written in the app's transaction, cursor assigner after commit (`GET_LOCK`), retention that keeps the newest state per record, poll log; schema in [`schema/mysql-source.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql-source.sql) |
 
 Planned: caching, GraphQL helpers and token credentials.
+
+## HTTP groundwork: `z40-fundament-http`
+
+```toml
+[dependencies]
+z40-fundament-http = { version = "0.4", features = ["request-id", "trace", "telemetry"] }
+```
+
+| Feature | What it gives you |
+|---|---|
+| *(none)* | `SecurityHeaders` (CSP checked: no `'unsafe-inline'` for scripts, `frame-ancestors` required; `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-*`; no HSTS), `NoStore`, `TrustedProxies` / `ClientIp` (`X-Forwarded-For` only from trusted proxies, also as `client_ip` function of the endpoints above), `Csrf` (custom header on state-changing requests, exempt paths, `403 {"code":"CSRF",…}` or the app's own answer) |
+| `request-id` | `RequestIdLayer`: keeps a safe incoming `X-Request-Id` or creates a UUID v7, echoes it |
+| `trace` | `trace::layer()`: method, route template, request id, status, latency – never query strings, headers or bodies |
+| `telemetry` | `TelemetryConfig`: JSON or readable logs from `<PREFIX>_LOG` / `<PREFIX>_LOG_FORMAT`, idempotent `init` |
+
+Usage and layer order: [crate README](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament-http/README.md).
 
 ## Quick start: consume a feed into MariaDB
 
@@ -176,7 +194,8 @@ feed consumer (built-in plus platform store / `SSL_CERT_FILE`).
 
 - [`docs/protocol.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/docs/protocol.md) – the feed and status protocol (version 1)
 - [`docs/configuration.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/docs/configuration.md) – environment variables (generated, checked by a test)
-- API documentation: `just doc` or [docs.rs](https://docs.rs/z40-fundament)
+- API documentation: `just doc` or docs.rs ([z40-fundament](https://docs.rs/z40-fundament),
+  [z40-fundament-http](https://docs.rs/z40-fundament-http))
 - [`CONTRIBUTING.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/CONTRIBUTING.md) – development, quality gate, release process
 - [`SECURITY.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/SECURITY.md) – reporting vulnerabilities
 - [`CHANGELOG.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/CHANGELOG.md)

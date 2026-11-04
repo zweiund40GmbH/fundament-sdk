@@ -5,6 +5,7 @@ Every setting is read through a `from_lookup(prefix, lookup)` function: `lookup`
 prefix `CRM_FEED`, the variable `<PREFIX>_URL` is `CRM_FEED_URL`.
 
 Values are trimmed; an empty value counts as unset. Error messages name the variable but never echo its value.
+The crate `z40-fundament-http` reads its settings the same way (section below).
 
 The tables below are generated from the code (`just config-doc`); a test fails when they are outdated.
 
@@ -45,3 +46,24 @@ Read with `StatusKeys::from_lookup(prefix, lookup)`.
 | `<PREFIX>_STATUS_KEYS` | (unset) | Status keys of the apps this app polls, as comma-separated `app=key` entries (one key per app; a key is only sent to its own app). Unset or empty: no app is polled. Secret. |
 
 <!-- END GENERATED -->
+
+## z40-fundament-http
+
+<!-- BEGIN GENERATED: just config-doc (z40-fundament-http) -->
+### Client address (`z40-fundament-http`, always on)
+
+Read with `TrustedProxies::from_lookup(prefix, lookup)`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `<PREFIX>_TRUSTED_PROXIES` | (unset) | Reverse proxies whose `X-Forwarded-For` is believed, as comma-separated addresses or CIDR networks (`10.0.0.0/8, fd00::/8`). Unset or empty: no proxy is trusted and the TCP peer is the client. List only your own proxies. |
+
+### Log setup (`z40-fundament-http`, feature `telemetry`)
+
+Read with `TelemetryConfig::from_lookup(prefix, lookup)`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `<PREFIX>_LOG` | `info` | Log filter as `EnvFilter` directive, e.g. `info,sqlx=warn` or `debug`. An invalid directive is a configuration error. |
+| `<PREFIX>_LOG_FORMAT` | `json` | `json` (one JSON object per line, for log collectors) or `pretty` (readable text for local work). |
+<!-- END GENERATED (z40-fundament-http) -->

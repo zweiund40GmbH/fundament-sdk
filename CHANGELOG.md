@@ -6,6 +6,36 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+Planned as 0.4.0 for both crates.
+
+### Added
+
+- New crate `z40-fundament-http` (first release): HTTP groundwork for axum 0.8 apps, configured with the
+  `from_lookup` helpers of `z40-fundament`.
+  - `security_headers::SecurityHeaders`: adds missing security headers (CSP, `X-Frame-Options` derived from
+    `frame-ancestors`, `X-Content-Type-Options`, `Referrer-Policy`, `Permissions-Policy`,
+    `Cross-Origin-Opener-Policy`, `Cross-Origin-Resource-Policy`); a CSP set by a route is kept. `check_csp`
+    refuses a CSP without script restriction, with `'unsafe-inline'` for scripts or without `frame-ancestors`.
+    HSTS is left to the edge proxy.
+  - `no_store::NoStore`: `Cache-Control: no-store` and `Pragma: no-cache` for chosen paths and prefixes,
+    with exceptions.
+  - `client_ip::TrustedProxies` (`<PREFIX>_TRUSTED_PROXIES`, addresses and CIDR networks), `ClientIp`
+    extractor and `resolver()` for `StatusEndpoint::client_ip` / `FeedEndpoint::client_ip`:
+    `X-Forwarded-For` only from trusted peers, walked from the right, several header lines as one list,
+    IPv4-mapped IPv6 peers as IPv4.
+  - `csrf::Csrf`: a custom header with an app-specific value on every state-changing request (or an own
+    check), protected and exempt paths and prefixes, default answer
+    `403 {"code":"CSRF","message":"Anfrage abgelehnt (CSRF-Schutz). Bitte laden Sie die Seite neu."}` or the
+    app's own.
+  - `request-id` (feature): `RequestIdLayer` keeps an incoming `X-Request-Id` of at most 64 characters of
+    `[A-Za-z0-9._:-]`, otherwise creates a UUID v7; sets it on request (header, `RequestId` extension) and
+    response.
+  - `trace` (feature): `trace::layer()` with a span of method, route template and request id, and status and
+    latency at the end; query strings, headers and bodies are never recorded.
+  - `telemetry` (feature): `TelemetryConfig` (`<PREFIX>_LOG`, `<PREFIX>_LOG_FORMAT` = `json` | `pretty`) and an
+    idempotent `init`.
+- `docs/configuration.md` gains a generated section for `z40-fundament-http`.
+
 ## [0.3.0] - 2026-11-04
 
 ### Added
