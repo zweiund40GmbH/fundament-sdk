@@ -6,6 +6,16 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-11-04
+
+### Fixed
+
+- `feed-consumer`: the HTTP client now trusts the platform certificate store (including `SSL_CERT_FILE`) in
+  addition to the built-in Mozilla roots. Before, a feed source with a certificate from a private CA failed with
+  "not reachable" (TLS `UnknownIssuer`).
+- `feed-consumer`: a transport failure is logged with its cause chain (TLS, DNS, connect); the fixed status text
+  stays "nicht erreichbar".
+
 ## [0.2.0] - 2026-11-04
 
 ### Changed (breaking)
@@ -54,6 +64,7 @@ All notable changes to this project are documented in this file. The format is b
 - `replica`: `Mapping`, `KeepFields`, `ReplicaStore`, `Replica` adapter.
 - `replica-mysql`: `MySqlStore` with configurable table prefix and `schema/mysql.sql`.
 
-[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/zweiund40GmbH/fundament-sdk/releases/tag/v0.1.0

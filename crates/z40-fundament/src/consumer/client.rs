@@ -56,6 +56,20 @@ impl std::fmt::Debug for FeedClient {
     }
 }
 
+/// Maps a transport error to [`FetchError::Unreachable`] and logs its cause chain (TLS, DNS, connect …) so
+/// operators can see why; the request carries the key only in a header, so the message never contains it.
+fn unreachable(e: reqwest::Error) -> FetchError {
+    let mut cause = e.to_string();
+    let mut source = std::error::Error::source(&e);
+    while let Some(s) = source {
+        cause.push_str(": ");
+        cause.push_str(&s.to_string());
+        source = s.source();
+    }
+    tracing::warn!(%cause, "feed source not reachable");
+    FetchError::Unreachable
+}
+
 impl FeedClient {
     /// Client for the validated `origin` (no trailing slash). `https_only` refuses plain http.
     pub(crate) fn new(origin: &str, key: BearerKey, https_only: bool) -> reqwest::Result<Self> {
@@ -91,12 +105,12 @@ impl FeedClient {
             .bearer_auth(self.key.expose())
             .send()
             .await
-            .map_err(|_| FetchError::Unreachable)?;
+            .map_err(unreachable)?;
         if !res.status().is_success() {
             return Err(FetchError::Status(res.status().as_u16()));
         }
         let mut body = Vec::new();
-        while let Some(chunk) = res.chunk().await.map_err(|_| FetchError::Unreachable)? {
+        while let Some(chunk) = res.chunk().await.map_err(unreachable)? {
             if body.len() + chunk.len() > BODY_MAX {
                 return Err(FetchError::Invalid);
             }

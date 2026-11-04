@@ -66,6 +66,10 @@ A failure of the feed (network, HTTP status, invalid page) is recorded at the cu
 part of the report; only a failure of your own database is an `Err`. The pool needs at least 2 connections
 (one holds the run lock).
 
+TLS: the consumer trusts the built-in Mozilla roots and the platform certificate store. A source with a
+certificate from a private CA works once that CA is in the platform store or in the file named by
+`SSL_CERT_FILE`. Transport failures are logged with their cause (`feed source not reachable`).
+
 ## Quick start: publish a feed from MariaDB
 
 ```toml
