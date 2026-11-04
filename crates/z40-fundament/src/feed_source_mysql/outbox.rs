@@ -87,9 +87,24 @@ pub enum WriteEventError {
     /// The event breaks a rule; nothing was written.
     #[error(transparent)]
     Invalid(#[from] InvalidEvent),
-    /// The database failed (also: the version of this record was already written).
+    /// This version of the record is already in the outbox (unique key `type`, `record_key`,
+    /// `version`): usually a lost update; nothing was written.
+    #[error("this version of the record was already written")]
+    VersionExists,
+    /// The database failed.
     #[error(transparent)]
     Store(#[from] StoreError),
+}
+
+/// MariaDB/MySQL error number of a duplicate key.
+const ER_DUP_ENTRY: u16 = 1062;
+
+/// Whether `e` is a duplicate key; the only unique key an insert can hit is the version key (`id` is
+/// generated, `cursor` is `NULL`).
+fn is_duplicate(e: &sqlx::Error) -> bool {
+    e.as_database_error()
+        .and_then(|d| d.try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>())
+        .is_some_and(|m| m.number() == ER_DUP_ENTRY)
 }
 
 impl MySqlSource {
@@ -112,8 +127,8 @@ impl MySqlSource {
 
     /// Writes `event` into the outbox **in the app's transaction `tx`**, together with the change it
     /// describes; the app commits or rolls back. The event gets its cursor after the commit (cursor
-    /// assigner). A tombstone's data is never stored. Writing the same version of a record twice fails
-    /// (unique key), so a lost update shows instead of two states with one version.
+    /// assigner). A tombstone's data is never stored. Writing the same version of a record twice is
+    /// [`WriteEventError::VersionExists`], so a lost update shows instead of two states with one version.
     pub async fn write_event(
         &self,
         tx: &mut Transaction<'_, MySql>,
@@ -137,7 +152,13 @@ impl MySqlSource {
         .bind(data)
         .execute(&mut **tx)
         .await
-        .map_err(db)?;
+        .map_err(|e| {
+            if is_duplicate(&e) {
+                WriteEventError::VersionExists
+            } else {
+                WriteEventError::Store(db(e))
+            }
+        })?;
         Ok(())
     }
 }

@@ -1,17 +1,19 @@
 //! The cursor assigner. One round:
 //!
-//! 1. takes `GET_LOCK('<prefix>fundament-cursor:<database>', 0)` on a connection of its own; if another
-//!    instance holds it, the round is skipped (what that instance assigns is visible to everyone). A
-//!    connection that took the lock is closed afterwards instead of going back to the pool
-//!    (`close_on_drop`), so neither the lock nor the session settings below can leak – also when the
-//!    round is cancelled.
+//! 1. takes `GET_LOCK('<prefix>fundament-cursor:<database>', 0)` on a **new connection per round**; if
+//!    another instance holds it, the round is skipped (what that instance assigns is visible to
+//!    everyone). The connection is marked `close_on_drop` *before* `GET_LOCK`, so it never goes back to
+//!    the pool: neither the lock nor the session settings below can leak – also when the round is
+//!    cancelled while `GET_LOCK` is on its way. This costs one reconnect per round.
 //! 2. numbers events in batches, each in one `READ COMMITTED` transaction (no gap locks, so writers of
 //!    the outbox are never blocked): lock the counter row, lock the events without cursor in the order of
 //!    origin (`id`), give them `last + 1 …`, move the counter, commit. The new cursors become visible all
 //!    at once with the commit.
 //!
 //! The locking read **waits** for an event of a still open transaction instead of numbering a later
-//! event first – at most [`LOCK_WAIT_SECS`]. Then the batch is given up and the round ends with what is
+//! event first (origin order across records) – at most the `max_wait` of the round, rounded up to whole
+//! seconds: [`WORKER_ASSIGN_WAIT`](crate::feed_source::WORKER_ASSIGN_WAIT) in the worker,
+//! [`REQUEST_ASSIGN_WAIT`](crate::feed_source::REQUEST_ASSIGN_WAIT) before a feed answer. Then the batch is given up and the round ends with what is
 //! assigned ([`AssignOutcome::Waiting`]); the open events get a higher cursor in a later round. No event
 //! is ever skipped, and a consumer following `nextCursor` never misses one.
 
@@ -21,9 +23,8 @@ use crate::feed_source::AssignOutcome;
 use crate::sql::db;
 use sqlx::mysql::MySqlDatabaseError;
 use sqlx::{Connection, MySqlConnection};
+use std::time::Duration;
 
-/// Longest wait for an event of an open transaction, in seconds.
-pub const LOCK_WAIT_SECS: u32 = 5;
 /// Events numbered per transaction.
 const BATCH: usize = 1000;
 /// Batches per round (bounded work per feed request).
@@ -45,8 +46,11 @@ fn is_lock_wait_timeout(e: &sqlx::Error) -> bool {
 
 impl MySqlSource {
     /// One round of the assigner (see the module docs).
-    pub(super) async fn assign(&self) -> Result<AssignOutcome, StoreError> {
+    pub(super) async fn assign(&self, max_wait: Duration) -> Result<AssignOutcome, StoreError> {
         let mut conn = self.pool.acquire().await.map_err(db)?;
+        // Before GET_LOCK: a round cancelled while the lock is being taken must not return a session
+        // that holds it to the pool.
+        conn.close_on_drop();
         let got: Option<i64> =
             sqlx::query_scalar("SELECT GET_LOCK(LEFT(CONCAT(?, ':', DATABASE()), 64), 0)")
                 .bind(&self.tables.lock)
@@ -54,14 +58,13 @@ impl MySqlSource {
                 .await
                 .map_err(db)?;
         if got != Some(1) {
-            // Not taken: the session holds nothing and may go back to the pool.
             return Ok(AssignOutcome::Skipped);
         }
-        conn.close_on_drop();
-        // Session settings of this connection only; it is closed after the round. The value is a
-        // constant of this module (SET takes no bind parameter).
+        // Session settings of this connection only; it is closed after the round. The value is an
+        // integer computed here (SET takes no bind parameter); InnoDB's minimum is 1 second.
+        let secs = (max_wait.as_secs() + u64::from(max_wait.subsec_nanos() > 0)).clamp(1, 3600);
         sqlx::query(sqlx::AssertSqlSafe(format!(
-            "SET SESSION innodb_lock_wait_timeout = {LOCK_WAIT_SECS}"
+            "SET SESSION innodb_lock_wait_timeout = {secs}"
         )))
         .execute(&mut *conn)
         .await
@@ -101,10 +104,11 @@ impl MySqlSource {
         .fetch_optional(&mut *tx)
         .await?;
         let last = last.ok_or_else(|| sqlx::Error::Decode(Box::new(MissingCounter)))?;
-        // The cursor index holds the unassigned rows (`NULL`) in `id` order, so the locking read finds
-        // them without touching assigned rows and waits at the first row of an open transaction.
+        // `(cursor, id)` holds the unassigned rows (`NULL`) in `id` order: the locking read stops after
+        // `BATCH` rows (no filesort, so only those rows are locked) and waits only when an open
+        // transaction's row is among the first `BATCH` unassigned ones.
         let ids: Vec<u64> = sqlx::query_scalar(self.tables.sql(
-            "SELECT `id` FROM {outbox} FORCE INDEX (`uq_fundament_outbox_cursor`) \
+            "SELECT `id` FROM {outbox} FORCE INDEX (`ix_fundament_outbox_unassigned`) \
              WHERE `cursor` IS NULL ORDER BY `id` LIMIT ? FOR UPDATE",
         ))
         .bind(BATCH as u64)

@@ -10,6 +10,7 @@ use chrono::DateTime;
 use serde_json::{Value, json};
 use std::net::SocketAddr;
 use std::sync::Mutex;
+use std::time::Duration;
 use tower::ServiceExt;
 
 const T: &str = "urn:example:crm:customer";
@@ -49,7 +50,12 @@ impl FeedSourceStore for Fake {
     fn known_types(&self) -> &[String] {
         &self.types
     }
-    async fn assign_cursors(&self) -> Result<AssignOutcome, StoreError> {
+    async fn assign_cursors(&self, max_wait: Duration) -> Result<AssignOutcome, StoreError> {
+        assert_eq!(
+            max_wait,
+            crate::feed_source::REQUEST_ASSIGN_WAIT,
+            "short wait"
+        );
         self.push("assign".into());
         Ok(AssignOutcome::Assigned(0))
     }
@@ -80,8 +86,10 @@ impl FeedSourceStore for Fake {
         self.push(format!("poll {consumer} {next}"));
         Ok(())
     }
-    async fn record_failure(&self, _at: DateTime<Utc>) -> Result<(), StoreError> {
-        self.push("failure".into());
+    async fn record_failures(&self, n: u64, _at: DateTime<Utc>) -> Result<(), StoreError> {
+        for _ in 0..n {
+            self.push("failure".into());
+        }
         Ok(())
     }
 }
@@ -161,7 +169,7 @@ async fn check_order_brake_key_query() {
     assert_eq!(s, StatusCode::TOO_MANY_REQUESTS, "brake before key");
     assert_eq!(res.headers()[header::RETRY_AFTER], "60");
     assert_eq!(body(res).await["code"], "RATE_LIMITED");
-    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    tokio::time::sleep(Duration::from_millis(50)).await;
     let failures = log
         .lock()
         .unwrap()

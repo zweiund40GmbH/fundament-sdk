@@ -63,7 +63,7 @@ wrong credential gives `401` without details.
 
 | Field | Type | Meaning |
 |---|---|---|
-| `cursor` | integer ≥ 1 | Position in the feed. Assigned after commit in commit order, never reused. |
+| `cursor` | integer ≥ 1 | Position in the feed. Assigned after commit, in the order the events were written (order of origin), never reused. |
 | `id` | string | Unique id of the event (for de-duplication). |
 | `type` | string | Record type URN, `urn:<org>:<app>:<record>` – a type of record, not an action. |
 | `key` | string | Stable id of the record, a UUID in canonical form (36 characters). |
@@ -119,6 +119,9 @@ wrong credential gives `401` without details.
 - Build the time slots of runs from **UTC**; slots from local time repeat or skip an hour when the clocks
   change.
 - Keep only the fields you need. Never store personal data you do not need.
+- **Changing `types`** (asking for more or other types than before) needs a full resync from `since=0`: the
+  stored cursor may already be past events of the new types (the source skips ahead over events that did not
+  match the old filter, §2.7).
 
 ### 2.6 Errors of the feed
 
@@ -144,10 +147,12 @@ Messages of `400`: `Ungültige Abfrageparameter.`, `Jeder Parameter darf nur ein
   `since` that is not a non-negative integer or a `limit` outside `1..500` is `400`. Unknown parameters are
   ignored.
 - **Outbox in the transaction** (§1): the event is written in the transaction of the change.
-- **Cursor after commit.** Cursors are assigned to committed events only, ascending, from a counter that is
-  never reset (never reused, also after the retention deleted events). An event of a still open transaction
-  is never skipped: it gets a higher cursor once it is committed. All cursors of one assignment become
-  visible at once.
+- **Cursor after commit.** Cursors are assigned to committed events only, in the order of origin, from a
+  counter that is never reset (never reused, also after the retention deleted events). An event of a still
+  open transaction is never skipped: later events wait for it (a bounded time per round), and it gets a
+  cursor once it is committed. All cursors of one assignment become visible at once. A long transaction that
+  writes events therefore delays the feed by at most its own duration – keep such transactions short. A feed
+  request waits only briefly for them (the library: 1 s; its worker 5 s).
 - **Page.** Events with a cursor above `since`, ascending, at most `limit`; `hasMore` is `true` when more
   matching events exist (e.g. read `limit + 1`). `nextCursor` is the cursor of the last event, or `since`
   for an empty page. Without `hasMore` it may move further, up to the last cursor assigned before the read,

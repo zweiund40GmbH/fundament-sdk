@@ -105,8 +105,12 @@ assign_cursors_once(&source).await?;
 source.purge(config.retention()).await?;
 ```
 
-Cursors are assigned **after commit** (the endpoint also runs the assigner before every answer), so an event
-of a transaction that commits late is never skipped. The retention deletes only superseded events; the newest
+Cursors are assigned **after commit** in the order of origin (the endpoint also runs the assigner before every
+answer, waiting at most 1 s), so an event of a transaction that commits late is never skipped. Later events
+wait for it, so a long transaction that writes outbox rows delays the feed by at most its own duration: keep
+those transactions short. The assigner updates under `READ COMMITTED`; with binary logging use `binlog_format`
+`ROW` or `MIXED` (`STATEMENT` is not supported). Each round opens one new connection (it holds `GET_LOCK` and
+is closed afterwards). The retention deletes only superseded events; the newest
 state of every record stays, so `since=0` is always a full initial sync. For the status document,
 `source_status(builder, &source, &config.clients, now)` adds the offers per type, the last poll and backlog
 of every consumer, and the failed attempts of 24 hours. Share one `FailureBrake` between the feed and the

@@ -6,13 +6,17 @@
 //! * the **outbox**: [`MySqlSource::write_event`] writes an event in the app's own transaction, together
 //!   with the change (the library never opens or commits that transaction)
 //! * the **cursor assigner**: under `GET_LOCK` on a held connection, committed events get ascending
-//!   cursors in the order of origin; it waits at most [`LOCK_WAIT_SECS`] for events of a still open
-//!   transaction and never skips one (they get a higher cursor in a later round)
+//!   cursors in the order of origin; it waits a bounded time for events of a still open transaction and
+//!   never skips one (they get a higher cursor in a later round). Each round uses a new connection.
 //! * the **retention**: [`MySqlSource::purge`] deletes only superseded events; the newest state of every
 //!   record (also a tombstone) stays, so `since=0` is a full initial sync and `gap` is never needed
 //! * the **poll log** and the failed attempts per hour, for the status document
 //!
 //! All SQL uses bind parameters; table names are not input but validated identifiers.
+//!
+//! **Server settings.** The assigner and the retention update under `READ COMMITTED`; with binary
+//! logging this needs `binlog_format` `ROW` or `MIXED` (`STATEMENT` is not supported). Keep transactions
+//! that write outbox rows short: a long one delays the feed by at most its own duration.
 
 mod assign;
 mod outbox;
@@ -20,7 +24,6 @@ mod polls;
 mod read;
 mod retention;
 
-pub use assign::LOCK_WAIT_SECS;
 pub use outbox::{InvalidEvent, OutboxEvent, WriteEventError};
 pub use retention::FAILURE_RETENTION_HOURS;
 

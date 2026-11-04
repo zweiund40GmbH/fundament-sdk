@@ -3,6 +3,9 @@
 // Test helpers: each test uses only some of them, and failing fast with unwrap is intended.
 #![allow(dead_code, clippy::unwrap_used)]
 
+#[cfg(feature = "feed-source-mysql")]
+pub mod source;
+
 use axum::Router;
 use axum::extract::{Query, State};
 use axum::http::StatusCode;

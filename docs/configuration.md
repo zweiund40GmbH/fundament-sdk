@@ -26,7 +26,7 @@ Read with `FeedSourceConfig::from_lookup(prefix, lookup)`.
 | Variable | Default | Description |
 |---|---|---|
 | `<PREFIX>_FEED_CLIENTS` | (unset) | Accepted feed keys as comma-separated `name=sha256hex` entries (only the SHA-256 of a key, never the key); the name identifies the consumer in the status document. Unset or empty: every feed request gets `401`. Keep it separate from status keys. |
-| `<PREFIX>_FEED_RETENTION_DAYS` | `30` | Days an event is kept after a newer version of the same record superseded it, 7–3650. The newest state of every record (also a tombstone) is always kept. |
+| `<PREFIX>_FEED_RETENTION_DAYS` | `30` | Retention of superseded events, 7–3650 days: an event is deleted once a newer version of the same record exists and its own `occurred_at` is older than this. The newest state of every record (also a tombstone) is always kept. |
 
 ### Status endpoint (`status`)
 

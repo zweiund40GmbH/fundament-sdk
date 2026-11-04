@@ -3,11 +3,14 @@
 -- Copy these statements into a migration of your app. The library never runs migrations in your
 -- database. With a table prefix (`SourceTables::with_prefix("app_")`) put the prefix in front of every
 -- table name, or print the prefixed statements with `SourceTables::schema()`.
--- All times are UTC.
+-- All times are UTC. Check constraints are unnamed on purpose: MySQL 8 wants constraint names unique per
+-- schema, and the server names unnamed ones after their table. `cursor` is a reserved word; quote it in
+-- your own queries. Updates under READ COMMITTED need `binlog_format` ROW or MIXED (not STATEMENT).
 
 -- The outbox: one row per change, written by the app in the transaction of the change
 -- (`MySqlSource::write_event`). `cursor` is NULL until the cursor assigner numbers the committed row.
--- `id` is the order of origin and the event id on the wire. (`type`, `record_key`, `version`) is unique:
+-- `id` is the order of origin and the event id on the wire; `ix_fundament_outbox_unassigned` lets the
+-- assigner read the unassigned rows in `id` order without sorting. (`type`, `record_key`, `version`) is unique:
 -- versions strictly increase per record.
 CREATE TABLE IF NOT EXISTS `fundament_outbox` (
   `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT COMMENT 'order of origin, event id on the wire',
@@ -17,13 +20,14 @@ CREATE TABLE IF NOT EXISTS `fundament_outbox` (
   `deleted`     TINYINT(1) NOT NULL DEFAULT 0 COMMENT '1 = tombstone (data NULL)',
   `occurred_at` DATETIME(3) NOT NULL COMMENT 'time of the change',
   `data`        LONGTEXT NULL COMMENT 'state of the record as JSON, only fields consumers may see',
-  `cursor`      BIGINT UNSIGNED NULL COMMENT 'position in the feed, assigned after commit',
+  `cursor`      BIGINT UNSIGNED NULL COMMENT 'position in the feed, assigned after commit (reserved word: quote it)',
   PRIMARY KEY (`id`),
   UNIQUE KEY `uq_fundament_outbox_cursor` (`cursor`),
+  KEY `ix_fundament_outbox_unassigned` (`cursor`, `id`),
   UNIQUE KEY `uq_fundament_outbox_version` (`type`, `record_key`, `version`),
   KEY `ix_fundament_outbox_type_cursor` (`type`, `cursor`),
   KEY `ix_fundament_outbox_type_time` (`type`, `occurred_at`),
-  CONSTRAINT `ck_fundament_outbox_data` CHECK (`data` IS NULL OR JSON_VALID(`data`))
+  CHECK (`data` IS NULL OR JSON_VALID(`data`))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 -- The last cursor ever assigned (one row). It lives apart from the outbox, so cursors are never reused
@@ -32,7 +36,7 @@ CREATE TABLE IF NOT EXISTS `fundament_outbox_counter` (
   `id`   TINYINT UNSIGNED NOT NULL COMMENT 'always 1',
   `last` BIGINT UNSIGNED NOT NULL COMMENT 'last cursor ever assigned',
   PRIMARY KEY (`id`),
-  CONSTRAINT `ck_fundament_outbox_counter_one` CHECK (`id` = 1)
+  CHECK (`id` = 1)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
 
 -- The single counter row; starts above any cursor an existing outbox may already hold.

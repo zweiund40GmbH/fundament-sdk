@@ -2,7 +2,10 @@
 //! counted) → query (`400`) → cursor assignment → read (`200`, or `500`). Every answer carries
 //! `Cache-Control: no-store`; errors have the form `{"code","message"}` (`docs/protocol.md` §2.6).
 
-use super::{FeedQuery, FeedSourceStore, QueryError, assign_cursors_once, build_page};
+use super::failures::FailureCounter;
+use super::{
+    FeedQuery, FeedSourceStore, QueryError, REQUEST_ASSIGN_WAIT, assign_logged, build_page,
+};
 use crate::credentials::{FailureBrake, KeyList};
 use crate::http::{Checked, Gate, error, internal, json_ok};
 use crate::protocol::EVENTS_PATH;
@@ -28,6 +31,7 @@ use std::sync::Arc;
 pub struct FeedEndpoint<S> {
     store: Arc<S>,
     gate: Gate,
+    failures: Arc<FailureCounter>,
 }
 
 impl<S: FeedSourceStore> FeedEndpoint<S> {
@@ -36,6 +40,7 @@ impl<S: FeedSourceStore> FeedEndpoint<S> {
         Self {
             store: Arc::new(store),
             gate: Gate::new(keys, "feed"),
+            failures: Arc::new(FailureCounter::default()),
         }
     }
 
@@ -75,7 +80,9 @@ impl<S: FeedSourceStore> FeedEndpoint<S> {
             Checked::Caller(c) => c,
             Checked::Braked(res) => return res,
             Checked::Unauthenticated(res) => {
-                self.count_failure();
+                // In memory; at most one task writes to the store, so a `401` never waits for the
+                // database and guessers cannot create database work per request.
+                self.failures.count(&self.store);
                 return res;
             }
         };
@@ -86,8 +93,9 @@ impl<S: FeedSourceStore> FeedEndpoint<S> {
                 return error(StatusCode::BAD_REQUEST, "BAD_REQUEST", e.message());
             }
         };
-        // A failed assignment is logged; the answer goes on with what is assigned.
-        let _ = assign_cursors_once(&*self.store).await;
+        // Short wait: the worker assigns what an open transaction holds back. A failed assignment is
+        // logged; the answer goes on with what is assigned.
+        let _ = assign_logged(&*self.store, REQUEST_ASSIGN_WAIT).await;
         let page = match self.read(&query).await {
             Ok(p) => p,
             Err(e) => {
@@ -122,17 +130,6 @@ impl<S: FeedSourceStore> FeedEndpoint<S> {
             .read(q.since, q.limit.saturating_add(1), &q.types)
             .await?;
         Ok(build_page(events, q.since, q.limit, scanned_to))
-    }
-
-    /// Counts a failed attempt in its own task, so a `401` never waits for the database (and guessers
-    /// cannot slow other requests down through it).
-    fn count_failure(&self) {
-        let store = Arc::clone(&self.store);
-        tokio::spawn(async move {
-            if let Err(e) = store.record_failure(Utc::now()).await {
-                tracing::warn!(error = %e, "failed feed attempt could not be counted");
-            }
-        });
     }
 }
 

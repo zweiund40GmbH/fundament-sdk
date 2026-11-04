@@ -36,13 +36,19 @@ impl MySqlSource {
         Ok(())
     }
 
-    /// Counts a failed attempt into the row of its hour.
-    pub(super) async fn count_failure(&self, at: DateTime<Utc>) -> Result<(), StoreError> {
+    /// Adds `count` failed attempts to the row of the hour of `at`.
+    pub(super) async fn count_failures(
+        &self,
+        count: u64,
+        at: DateTime<Utc>,
+    ) -> Result<(), StoreError> {
+        let count = u32::try_from(count).unwrap_or(u32::MAX);
         sqlx::query(self.tables.sql(
-            "INSERT INTO {failure} (`hour`, `attempts`) VALUES (?, 1) \
-             ON DUPLICATE KEY UPDATE `attempts` = `attempts` + 1",
+            "INSERT INTO {failure} (`hour`, `attempts`) VALUES (?, ?) \
+             ON DUPLICATE KEY UPDATE `attempts` = LEAST(`attempts` + VALUES(`attempts`), 4294967295)",
         ))
         .bind(hour(at))
+        .bind(count)
         .execute(&self.pool)
         .await
         .map_err(db)?;
@@ -51,37 +57,34 @@ impl MySqlSource {
 }
 
 impl SourceStatusStore for MySqlSource {
-    /// Two grouped queries over the indexes `(type, cursor)` and `(type, occurred_at)`.
+    /// Two queries per known type over the indexes `(type, cursor)` and `(type, occurred_at)`.
     async fn offer_figures(&self, now: DateTime<Utc>) -> Result<Vec<OfferFigures>, StoreError> {
-        let cursors: Vec<(String, Option<u64>)> = sqlx::query_as(
-            self.tables
-                .sql("SELECT `type`, MAX(`cursor`) FROM {outbox} GROUP BY `type`"),
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(db)?;
-        let counts: Vec<(String, i64, i64)> = sqlx::query_as(self.tables.sql(
-            "SELECT `type`, COUNT(*), CAST(COALESCE(SUM(`occurred_at` > ?), 0) AS SIGNED) \
-             FROM {outbox} WHERE `occurred_at` > ? GROUP BY `type`",
-        ))
-        .bind((now - chrono::Duration::minutes(5)).naive_utc())
-        .bind((now - chrono::Duration::hours(24)).naive_utc())
-        .fetch_all(&self.pool)
-        .await
-        .map_err(db)?;
-        let mut out: Vec<OfferFigures> = cursors
-            .into_iter()
-            .map(|(record_type, c)| OfferFigures {
-                record_type,
-                last_cursor: c.unwrap_or(0),
-                ..OfferFigures::default()
-            })
-            .collect();
-        for (record_type, h24, m5) in counts {
-            if let Some(f) = out.iter_mut().find(|f| f.record_type == record_type) {
-                f.last_24_hours = u64::try_from(h24).unwrap_or(0);
-                f.last_5_minutes = u64::try_from(m5).unwrap_or(0);
-            }
+        let mut out = Vec::with_capacity(self.types.len());
+        for record_type in &self.types {
+            let last: Option<u64> = sqlx::query_scalar(
+                self.tables
+                    .sql("SELECT MAX(`cursor`) FROM {outbox} WHERE `type` = ?"),
+            )
+            .bind(record_type)
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db)?;
+            let (h24, m5): (i64, i64) = sqlx::query_as(self.tables.sql(
+                "SELECT COUNT(*), CAST(COALESCE(SUM(`occurred_at` > ?), 0) AS SIGNED) \
+                 FROM {outbox} WHERE `type` = ? AND `occurred_at` > ?",
+            ))
+            .bind((now - chrono::Duration::minutes(5)).naive_utc())
+            .bind(record_type)
+            .bind((now - chrono::Duration::hours(24)).naive_utc())
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db)?;
+            out.push(OfferFigures {
+                record_type: record_type.clone(),
+                last_cursor: last.unwrap_or(0),
+                last_5_minutes: u64::try_from(m5).unwrap_or(0),
+                last_24_hours: u64::try_from(h24).unwrap_or(0),
+            });
         }
         Ok(out)
     }

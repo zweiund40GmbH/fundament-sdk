@@ -16,7 +16,7 @@ pub const RETENTION_DAYS_RANGE: RangeInclusive<u64> = 7..=3650;
 pub struct FeedSourceConfig {
     /// Accepted feed keys (`<PREFIX>_FEED_CLIENTS`); empty = every feed request gets `401`.
     pub clients: KeyList,
-    /// Days a superseded event is kept (`<PREFIX>_FEED_RETENTION_DAYS`).
+    /// Days after its `occurred_at` a superseded event is deleted (`<PREFIX>_FEED_RETENTION_DAYS`).
     pub retention_days: u64,
 }
 
@@ -33,8 +33,9 @@ impl FeedSourceConfig {
         ConfigVar {
             suffix: "FEED_RETENTION_DAYS",
             default: Some("30"),
-            description: "Days an event is kept after a newer version of the same record superseded it, \
-                7–3650. The newest state of every record (also a tombstone) is always kept.",
+            description: "Retention of superseded events, 7–3650 days: an event is deleted once a newer \
+                version of the same record exists and its own `occurred_at` is older than this. The newest \
+                state of every record (also a tombstone) is always kept.",
         },
     ];
 

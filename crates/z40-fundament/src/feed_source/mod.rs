@@ -20,6 +20,7 @@
 
 mod config;
 mod endpoint;
+mod failures;
 mod page;
 mod query;
 #[cfg(feature = "status")]
@@ -40,6 +41,11 @@ use std::time::Duration;
 
 /// How often the app's worker should run [`assign_cursors_once`].
 pub const ASSIGN_INTERVAL: Duration = Duration::from_secs(2);
+/// Longest wait of the worker's assigner for an event of an open transaction.
+pub const WORKER_ASSIGN_WAIT: Duration = Duration::from_secs(5);
+/// Longest wait of the assigner a feed request runs before answering: short, so a long transaction does
+/// not hold up the answer (the worker assigns the waiting events later).
+pub const REQUEST_ASSIGN_WAIT: Duration = Duration::from_secs(1);
 
 /// Result of one round of the cursor assigner.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -60,9 +66,13 @@ pub trait FeedSourceStore: Send + Sync + 'static {
     fn known_types(&self) -> &[String];
 
     /// Gives every committed event without a cursor the next cursors, in the order of origin, and
-    /// never reuses or skips one (see the module docs). Must serialise concurrent assigners (e.g. a
-    /// database lock) and make the new cursors visible all at once (one transaction).
-    fn assign_cursors(&self) -> impl Future<Output = Result<AssignOutcome, StoreError>> + Send;
+    /// never reuses or skips one (see the module docs). Waits at most `max_wait` for an event of a still
+    /// open transaction. Must serialise concurrent assigners (e.g. a database lock; a held lock means
+    /// [`AssignOutcome::Skipped`], not waiting) and make the new cursors visible all at once.
+    fn assign_cursors(
+        &self,
+        max_wait: Duration,
+    ) -> impl Future<Output = Result<AssignOutcome, StoreError>> + Send;
 
     /// The last cursor ever assigned, when the store knows it: every event up to it is committed and
     /// readable. Lets a consumer of rare types skip events of other types ([`build_page`]). The default
@@ -90,10 +100,12 @@ pub trait FeedSourceStore: Send + Sync + 'static {
         at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 
-    /// Counts a request with a missing or wrong feed key at `at` (no address, no key). The total of
-    /// 24 hours appears as a note in the status document.
-    fn record_failure(
+    /// Adds `count` requests with a missing or wrong feed key at `at` (no address, no key). The
+    /// endpoint counts in memory and calls this from at most one task at a time. The total of 24 hours
+    /// appears as a note in the status document.
+    fn record_failures(
         &self,
+        count: u64,
         at: DateTime<Utc>,
     ) -> impl Future<Output = Result<(), StoreError>> + Send;
 }
@@ -148,13 +160,24 @@ pub trait SourceStatusStore: Send + Sync {
     ) -> impl Future<Output = Result<u64, StoreError>> + Send;
 }
 
-/// One round of the cursor assigner with logging. The app's worker calls this every
-/// [`ASSIGN_INTERVAL`]; the endpoint calls it before each answer and goes on with what is assigned
-/// when it fails.
+/// One round of the cursor assigner with logging, waiting at most [`WORKER_ASSIGN_WAIT`] for open
+/// transactions. The app's worker calls this every [`ASSIGN_INTERVAL`]; the endpoint runs a round with
+/// [`REQUEST_ASSIGN_WAIT`] before each answer.
+///
+/// A long transaction that writes outbox rows delays the feed by at most its own duration (later events
+/// wait for it, to keep the order of origin): keep such transactions short.
 pub async fn assign_cursors_once<S: FeedSourceStore>(
     store: &S,
 ) -> Result<AssignOutcome, StoreError> {
-    let outcome = store.assign_cursors().await;
+    assign_logged(store, WORKER_ASSIGN_WAIT).await
+}
+
+/// One round with `max_wait`, logged.
+pub(crate) async fn assign_logged<S: FeedSourceStore>(
+    store: &S,
+    max_wait: Duration,
+) -> Result<AssignOutcome, StoreError> {
+    let outcome = store.assign_cursors(max_wait).await;
     match &outcome {
         Ok(AssignOutcome::Assigned(n)) if *n > 0 => {
             tracing::debug!(count = n, "feed cursors assigned");

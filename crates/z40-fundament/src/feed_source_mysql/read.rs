@@ -8,6 +8,7 @@ use crate::protocol::feed::FeedEvent;
 use crate::protocol::timestamp;
 use crate::sql::db;
 use chrono::{DateTime, NaiveDateTime, Utc};
+use std::time::Duration;
 
 /// Stored data that is not JSON (the schema's check constraint was removed or bypassed).
 #[derive(Debug, Clone, Copy, thiserror::Error)]
@@ -53,8 +54,8 @@ impl FeedSourceStore for MySqlSource {
         &self.types
     }
 
-    async fn assign_cursors(&self) -> Result<AssignOutcome, StoreError> {
-        self.assign().await
+    async fn assign_cursors(&self, max_wait: Duration) -> Result<AssignOutcome, StoreError> {
+        self.assign(max_wait).await
     }
 
     async fn last_cursor(&self) -> Result<Option<u64>, StoreError> {
@@ -104,7 +105,7 @@ impl FeedSourceStore for MySqlSource {
         self.remember_poll(consumer, next_cursor, at).await
     }
 
-    async fn record_failure(&self, at: DateTime<Utc>) -> Result<(), StoreError> {
-        self.count_failure(at).await
+    async fn record_failures(&self, count: u64, at: DateTime<Utc>) -> Result<(), StoreError> {
+        self.count_failures(count, at).await
     }
 }
