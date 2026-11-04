@@ -5,15 +5,8 @@
 use super::{InvalidKind, Mapping, Projection, check_kind};
 use serde_json::{Map, Value};
 
-/// Longest kept text (characters); longer strings are cut.
-pub const TEXT_MAX: usize = 200;
-
-/// The string field `name` of the object `v`, trimmed and cut to [`TEXT_MAX`] characters; `None`
-/// when missing, not a string or blank.
-pub fn text_field(v: &Value, name: &str) -> Option<String> {
-    let s = v.get(name)?.as_str()?.trim();
-    (!s.is_empty()).then(|| s.chars().take(TEXT_MAX).collect())
-}
+// Defined in the core module `fields` (usable without features); re-exported at the 0.1.0 path.
+pub use crate::fields::{TEXT_MAX, text_field};
 
 /// One kept type.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -8,6 +8,7 @@
 //! Always available (no feature):
 //!
 //! * [`protocol`] – wire types of the feed and the status level, page validation, version rule
+//! * [`fields`] – pure field helpers for mappings (`text_field`)
 //! * [`health`] – health rule of a consumed source and the events on change
 //! * [`config`] – `from_lookup` configuration helpers and the generated reference
 //! * [`secret`] – a string type with redacted `Debug`
@@ -38,6 +39,7 @@ pub mod feed_source;
 #[cfg(feature = "feed-source-mysql")]
 #[cfg_attr(docsrs, doc(cfg(feature = "feed-source-mysql")))]
 pub mod feed_source_mysql;
+pub mod fields;
 pub mod health;
 #[cfg(any(feature = "status", feature = "feed-source"))]
 mod http;

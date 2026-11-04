@@ -44,7 +44,12 @@ pub struct StatusEndpoint<P> {
     provider: P,
     gate: Gate,
     deadline: Duration,
+    on_failed_attempt: Option<FailedAttemptHook>,
 }
+
+/// Called on every status request with a missing or wrong key (see
+/// [`StatusEndpoint::on_failed_attempt`]).
+pub type FailedAttemptHook = Arc<dyn Fn() + Send + Sync>;
 
 impl<P: StatusProvider> StatusEndpoint<P> {
     /// An endpoint answering with `provider` for callers presenting a key of `keys`.
@@ -53,7 +58,16 @@ impl<P: StatusProvider> StatusEndpoint<P> {
             provider,
             gate: Gate::new(keys, "status"),
             deadline: DEFAULT_DEADLINE,
+            on_failed_attempt: None,
         }
+    }
+
+    /// Calls `hook` on every request with a missing or wrong status key (not on braked ones), e.g. to
+    /// count failed status attempts for a note of the document. It runs inside the request: keep it
+    /// cheap and non-blocking (e.g. increment an atomic counter that a worker stores).
+    pub fn on_failed_attempt(mut self, hook: impl Fn() + Send + Sync + 'static) -> Self {
+        self.on_failed_attempt = Some(Arc::new(hook));
+        self
     }
 
     /// Shares `brake` with other endpoints (e.g. the feed of the same app).
@@ -97,7 +111,13 @@ impl<P: StatusProvider> StatusEndpoint<P> {
     pub async fn handle(&self, parts: &Parts) -> Response {
         let caller = match self.gate.check(parts) {
             Checked::Caller(c) => c,
-            Checked::Braked(res) | Checked::Unauthenticated(res) => return res,
+            Checked::Braked(res) => return res,
+            Checked::Unauthenticated(res) => {
+                if let Some(hook) = &self.on_failed_attempt {
+                    hook();
+                }
+                return res;
+            }
         };
         match tokio::time::timeout(self.deadline, self.provider.status(caller)).await {
             Ok(Ok(doc)) => json_ok(doc),

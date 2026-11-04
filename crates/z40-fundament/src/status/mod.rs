@@ -12,7 +12,7 @@ pub mod handler;
 
 pub use builder::{BACKLOG_CAP, MAX_EVENTS, StatusBuilder, events_per_minute};
 pub use document::{Note, Offer, Poller, Source, StatusDocument, StatusEvent};
-pub use handler::{ClientIp, StatusEndpoint, StatusProvider};
+pub use handler::{ClientIp, FailedAttemptHook, StatusEndpoint, StatusProvider};
 
 use crate::config::{ConfigError, ConfigVar};
 use crate::credentials::KeyList;

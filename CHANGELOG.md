@@ -16,10 +16,20 @@ Planned as 0.2.0 (new features; the 0.1.0 API is unchanged).
   `FeedSourceConfig::from_lookup` (`<PREFIX>_FEED_CLIENTS`, `<PREFIX>_FEED_RETENTION_DAYS`).
 - `feed-source` with `status`: `source_status` fills `angebote`, `abrufer` and the note on failed feed
   attempts of 24 hours.
-- `feed-source-mysql`: `MySqlSource` with `write_event` (outbox in the app's transaction), cursor assigner
-  after commit under `GET_LOCK`, `purge` (keeps the newest state per record), poll log and failed-attempt
-  counters; `SourceTables` and `schema/mysql-source.sql`.
+- `feed-source-mysql`: `MySqlSource` with `write_event` (outbox in the app's transaction,
+  `WriteEventError::VersionExists` for a repeated version), cursor assigner after commit under `GET_LOCK`
+  (index `(cursor, id)`, bounded wait: 5 s in the worker, 1 s before a feed answer), `purge` (keyset walk,
+  keeps the newest state per record), poll log and failed-attempt counters (counted in memory, written by
+  at most one task); `SourceTables` and `schema/mysql-source.sql`. Needs `binlog_format` `ROW` or `MIXED`.
 - `docs/protocol.md`: errors of the feed (§2.6) and the duties of a source (§2.7), additive within version 1.
+- `fields` (no feature): `text_field` and `TEXT_MAX` for IO-free domain crates; `replica` re-exports them
+  at the 0.1.0 path.
+- `FeedConsumerConfig::disabled()` and `Default` (the off state).
+- `StatusEndpoint::on_failed_attempt` (hook on every `401`) and the type `FailedAttemptHook`.
+- `MySqlStore::recent_events` accepts any integer limit (`impl TryInto<u32>`), e.g. `status::MAX_EVENTS`;
+  existing calls with `u32` or literals compile unchanged.
+- `docs/protocol.md` §2.5: a consumer that changes `types` resyncs from `since=0`. §2.1: cursors follow the
+  order of origin (the text said "commit order").
 - `StoreError` is also available at the crate root (`z40_fundament::StoreError`); `consumer::StoreError`
   stays as a re-export.
 

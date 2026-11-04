@@ -61,7 +61,23 @@ pub struct FeedConsumerConfig {
     pub interval_secs: u64,
 }
 
+impl Default for FeedConsumerConfig {
+    /// The off state: no URL, no key, the default interval.
+    fn default() -> Self {
+        Self {
+            url: None,
+            key: None,
+            interval_secs: DEFAULT_INTERVAL_SECS,
+        }
+    }
+}
+
 impl FeedConsumerConfig {
+    /// The off state (same as [`Default`]), e.g. for apps that do not consume this feed.
+    pub fn disabled() -> Self {
+        Self::default()
+    }
+
     /// The variables read by [`FeedConsumerConfig::from_lookup`] (documented in `docs/configuration.md`).
     pub const VARIABLES: &'static [ConfigVar] = &[
         ConfigVar {
@@ -152,6 +168,12 @@ mod tests {
         assert_eq!(on.url.as_deref(), Some("https://crm.example.com:8443"));
         assert_eq!(on.interval_secs, 30);
         assert!(!format!("{on:?}").contains("s3cr3t"));
+    }
+
+    #[test]
+    fn disabled_is_the_unset_state() {
+        assert_eq!(FeedConsumerConfig::disabled(), cfg(&[]).unwrap());
+        assert!(!FeedConsumerConfig::default().is_enabled());
     }
 
     #[test]

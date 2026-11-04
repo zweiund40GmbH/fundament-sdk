@@ -175,3 +175,25 @@ async fn custom_resolver_captures_proxy_configuration() {
         StatusCode::OK
     );
 }
+
+#[tokio::test]
+async fn failed_attempts_reach_the_hook() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let count = Arc::new(AtomicU64::new(0));
+    let seen = Arc::clone(&count);
+    let keys = KeyList::parse(&key_entry("monitor", "good-key").unwrap()).unwrap();
+    let r: Router = StatusEndpoint::new(Fake::Ok, keys)
+        .on_failed_attempt(move || {
+            seen.fetch_add(1, Ordering::SeqCst);
+        })
+        .router();
+    for _ in 0..(MAX_FAILURES + 3) {
+        call(&r, Some("Bearer wrong"), "203.0.113.9").await;
+    }
+    call(&r, Some("Bearer good-key"), "203.0.113.10").await;
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        u64::from(MAX_FAILURES),
+        "braked ones are not counted"
+    );
+}

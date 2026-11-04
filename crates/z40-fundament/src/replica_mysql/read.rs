@@ -103,12 +103,14 @@ impl MySqlStore {
         Ok(rows.into_iter().map(stored).collect())
     }
 
-    /// The newest `max` events since `since`, newest first.
+    /// The newest `max` events since `since`, newest first. `max` is any integer, e.g.
+    /// `status::MAX_EVENTS` (`usize`) or a `u32`; values above `u32::MAX` count as `u32::MAX`.
     pub async fn recent_events(
         &self,
         since: DateTime<Utc>,
-        max: u32,
+        max: impl TryInto<u32>,
     ) -> Result<Vec<StoredEvent>, StoreError> {
+        let max: u32 = max.try_into().unwrap_or(u32::MAX);
         let rows: Vec<(NaiveDateTime, String, String, String)> = sqlx::query_as(self.tables.sql(
             "SELECT `time`, `kind`, `level`, `text` FROM {event} WHERE `time` >= ? \
              ORDER BY `time` DESC, `id` DESC LIMIT ?",
