@@ -5,12 +5,14 @@
 # data directory in RAM. Also callable from the release workflow (`workflow_call`).
 name: CI
 
+# Markdown and licence changes skip CI, except docs/configuration.md (checked by a test against the
+# code). Later patterns win, so the last line puts that file back in.
 on:
   push:
     branches: [main]
-    paths-ignore: ["**.md", "LICENSE-*"]
+    paths: ["**", "!**.md", "!LICENSE-*", "docs/configuration.md"]
   pull_request:
-    paths-ignore: ["**.md", "LICENSE-*"]
+    paths: ["**", "!**.md", "!LICENSE-*", "docs/configuration.md"]
   workflow_call:
 
 permissions:
@@ -80,6 +82,9 @@ jobs:
       - uses: taiki-e/install-action@v2
         with:
           tool: just
+      # In CI the integration tests must run, never skip.
+      - name: Require the test database
+        run: test -n "${TEST_DATABASE_URL:-}" || { echo "::error::TEST_DATABASE_URL is empty"; exit 1; }
       - run: just test
       - name: Packaging sanity check
         run: cargo package -p z40-fundament --locked --no-verify

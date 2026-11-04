@@ -34,6 +34,11 @@ clippy:
 # Tests with all features. Integration tests need TEST_DATABASE_URL (MariaDB server URL without
 # database name, e.g. mysql://root:pw@127.0.0.1:3306); without it they print `[skip]`.
 test:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    if [ -z "${TEST_DATABASE_URL:-}" ]; then
+        echo "[skip] MariaDB integration tests (replica_mysql, run_once): TEST_DATABASE_URL not set"
+    fi
     cargo test --workspace --all-features --locked
 
 # API docs with warnings as errors.
