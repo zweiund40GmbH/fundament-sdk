@@ -13,7 +13,7 @@ The Rust crate [`z40-fundament`](https://github.com/zweiund40GmbH/fundament-sdk/
 enables only the Cargo features it needs and connects the library to its own database through small traits.
 Ready-made MariaDB/MySQL implementations live behind their own feature.
 
-**Status:** pre-release (`0.1.0`, unreleased). The API may still change before `1.0`.
+**Status:** pre-release (`0.x`). The API may still change before `1.0`.
 
 ## Features
 
@@ -25,8 +25,10 @@ Ready-made MariaDB/MySQL implementations live behind their own feature.
 | `replica` | Local replica of feed records: `Mapping` (which fields you keep), `ReplicaStore`, the `Replica` adapter (version rule, tombstones) |
 | `replica-mysql` | `MySqlStore`: sqlx/MariaDB implementation of all consumer and replica traits (`GET_LOCK`, page and cursor in one transaction), schema in [`schema/mysql.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql.sql) |
 | `status` | Status document types and builder, and an axum router for `GET /fundament/v1/status` with key check and failure brake |
+| `feed-source` | Serving a feed: `FeedEndpoint` (axum router for `GET /fundament/v1/events`: key check, failure brake, query rules, `hasMore`), the `FeedSourceStore` and `SourceStatusStore` traits, `assign_cursors_once` for the worker; with `status` also `source_status` (`angebote`, `abrufer`, failed attempts) |
+| `feed-source-mysql` | `MySqlSource`: sqlx/MariaDB outbox written in the app's transaction, cursor assigner after commit (`GET_LOCK`), retention that keeps the newest state per record, poll log; schema in [`schema/mysql-source.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql-source.sql) |
 
-Planned: publishing a feed (`feed-source`), caching, GraphQL helpers, a status client and token credentials.
+Planned: caching, GraphQL helpers, a status client and token credentials.
 
 ## Quick start: consume a feed into MariaDB
 
@@ -63,6 +65,52 @@ let report = consumer.run_once(&store).await?;
 A failure of the feed (network, HTTP status, invalid page) is recorded at the cursor with a fixed text and is
 part of the report; only a failure of your own database is an `Err`. The pool needs at least 2 connections
 (one holds the run lock).
+
+## Quick start: publish a feed from MariaDB
+
+```toml
+[dependencies]
+z40-fundament = { version = "0.2", features = ["feed-source-mysql", "status"] }
+```
+
+1. Copy [`schema/mysql-source.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql-source.sql) into a migration of your
+   app (or print it with `SourceTables::with_prefix("app_").schema()`).
+2. Write an event **in the transaction of every change**, with the complete state the consumers may see:
+
+```rust,ignore
+use z40_fundament::feed_source::{FeedEndpoint, FeedSourceConfig, assign_cursors_once};
+use z40_fundament::feed_source_mysql::{MySqlSource, OutboxEvent, SourceTables};
+
+const CUSTOMER: &str = "urn:example:crm:customer";
+let source = MySqlSource::new(pool.clone(), SourceTables::with_prefix("app_")?, [CUSTOMER])?;
+
+let mut tx = pool.begin().await?;
+// … your own UPDATE of the customer, raising its version …
+let state = serde_json::json!({ "name": "Example Ltd", "address": { "city": "Springfield" } });
+source.write_event(&mut tx, &OutboxEvent::state(CUSTOMER, customer_id, version, state)).await?;
+tx.commit().await?;
+```
+
+3. Serve the feed and run the cursor assigner and the retention in your worker:
+
+```rust,ignore
+// APP_FEED_CLIENTS (name=sha256hex per consumer), APP_FEED_RETENTION_DAYS (docs/configuration.md)
+let config = FeedSourceConfig::from_lookup("APP", |k| std::env::var(k).ok())?;
+let app = axum::Router::new().merge(FeedEndpoint::new(source.clone(), config.clients.clone()).router());
+axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await?;
+
+// Worker: every ASSIGN_INTERVAL (2 s) …
+assign_cursors_once(&source).await?;
+// … and once a day:
+source.purge(config.retention()).await?;
+```
+
+Cursors are assigned **after commit** (the endpoint also runs the assigner before every answer), so an event
+of a transaction that commits late is never skipped. The retention deletes only superseded events; the newest
+state of every record stays, so `since=0` is always a full initial sync. For the status document,
+`source_status(builder, &source, &config.clients, now)` adds the offers per type, the last poll and backlog
+of every consumer, and the failed attempts of 24 hours. Share one `FailureBrake` between the feed and the
+status endpoint (`.brake(Arc::clone(&brake))`).
 
 ## Quick start: status endpoint
 

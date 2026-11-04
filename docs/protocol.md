@@ -4,8 +4,8 @@
 > version (new paths `/fundament/v2/…`); additive changes (new optional fields) are allowed within version 1.
 
 This document describes how apps exchange records and report their health. One app **owns** a kind of record
-(the *source*); other apps keep a local copy (the *consumers*). The crate `z40-fundament` implements the
-consumer side and the status endpoint of this protocol.
+(the *source*); other apps keep a local copy (the *consumers*). The crate `z40-fundament` implements both
+sides of the feed and the status endpoint of this protocol.
 
 Conventions: JSON bodies are UTF-8, times are UTC in RFC 3339 with seconds and `Z`
 (`2026-11-04T09:00:00Z`), field names are case-sensitive. Some field names and all human-readable texts of
@@ -119,6 +119,44 @@ wrong credential gives `401` without details.
 - Build the time slots of runs from **UTC**; slots from local time repeat or skip an hour when the clocks
   change.
 - Keep only the fields you need. Never store personal data you do not need.
+
+### 2.6 Errors of the feed
+
+Error bodies have the form of §3.2 (`{"code","message"}`, `Cache-Control: no-store`); a successful page
+carries `Cache-Control: no-store` as well. The source checks in this order: failure brake → credential →
+query.
+
+| Status | Code | Message | When |
+|---|---|---|---|
+| `400` | `BAD_REQUEST` | one of the texts below | The query is invalid (§2.7). |
+| `401` | `UNAUTHENTICATED` | `Anmeldung erforderlich.` | Missing or wrong credential. Header `WWW-Authenticate: Bearer`. No details. |
+| `429` | `RATE_LIMITED` | `Zu viele Fehlversuche. Bitte warten Sie eine Minute.` | Failure brake, see the end of §3.2. Header `Retry-After: 60`. |
+| `500` | `INTERNAL` | `Interner Fehler. Bitte versuchen Sie es später erneut.` | The events could not be read. |
+
+Messages of `400`: `Ungültige Abfrageparameter.`, `Jeder Parameter darf nur einmal vorkommen.`,
+`„since“ muss eine ganze Zahl ab 0 sein.`, `„limit“ muss zwischen 1 und 500 liegen.`,
+`Unbekannter Typ in „types“.`
+
+### 2.7 Source duties
+
+- **Query.** A missing or empty `since` is `0`; a missing or empty `limit` is `100`; a missing or empty
+  `types` means every type the caller may see. A type the source does not offer, a parameter given twice, a
+  `since` that is not a non-negative integer or a `limit` outside `1..500` is `400`. Unknown parameters are
+  ignored.
+- **Outbox in the transaction** (§1): the event is written in the transaction of the change.
+- **Cursor after commit.** Cursors are assigned to committed events only, ascending, from a counter that is
+  never reset (never reused, also after the retention deleted events). An event of a still open transaction
+  is never skipped: it gets a higher cursor once it is committed. All cursors of one assignment become
+  visible at once.
+- **Page.** Events with a cursor above `since`, ascending, at most `limit`; `hasMore` is `true` when more
+  matching events exist (e.g. read `limit + 1`). `nextCursor` is the cursor of the last event, or `since`
+  for an empty page. Without `hasMore` it may move further, up to the last cursor assigned before the read,
+  when no event in between matches `types` – so a consumer of rare types does not scan the same events again.
+- **`id`** is unique per event within the source (e.g. the outbox row id); tombstones carry no `data`.
+- **Retention** as recommended in §2.3; then `gap` is never `true`.
+- **Status.** The source remembers the last poll of each consumer (time and `nextCursor`) for `abrufer`
+  (§3) and counts failed credential attempts for the note `<n> Fehlversuche am Feed in 24 Stunden` (one:
+  `1 Fehlversuch am Feed in 24 Stunden`), level `warnung`, which does not change `zustand`.
 
 ## 3. Status
 
