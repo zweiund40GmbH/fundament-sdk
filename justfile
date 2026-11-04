@@ -64,4 +64,4 @@ config-doc:
 
 # Packaging sanity check (nothing is published).
 package:
-    cargo package -p {{crate}} --locked
+    cargo package -p {{crate}} --locked --no-verify

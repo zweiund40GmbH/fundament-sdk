@@ -10,7 +10,7 @@ repository.workspace = true
 readme = "README.md"
 keywords = ["change-feed", "replication", "sync", "status", "mariadb"]
 categories = ["database", "web-programming"]
-include = ["src/**/*.rs", "schema/*.sql", "README.md", "LICENSE-MIT", "LICENSE-APACHE"]
+include = ["src/**/*.rs", "tests/**/*.rs", "schema/*.sql", "README.md", "LICENSE-MIT", "LICENSE-APACHE"]
 
 [lints]
 workspace = true

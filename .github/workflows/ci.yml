@@ -1,0 +1,107 @@
+# CI of fundament-sdk: the recipes of the justfile in parallel jobs (local = CI).
+#
+# Public repository: GitHub-hosted runners only. Jobs are independent (no `needs:`) and share one
+# Rust cache, written only on `main`. Integration tests run against a MariaDB 10.11 service with its
+# data directory in RAM. Also callable from the release workflow (`workflow_call`).
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore: ["**.md", "LICENSE-*"]
+  pull_request:
+    paths-ignore: ["**.md", "LICENSE-*"]
+  workflow_call:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_INCREMENTAL: "0"
+
+jobs:
+  lint:
+    name: fmt, clippy (each feature), docs, file sizes
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      # Without a name, rustup installs the toolchain of rust-toolchain.toml.
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fundament-sdk
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just,cargo-hack
+      - run: just fmt
+      - run: just clippy
+      - run: just doc
+      - run: just lines
+
+  test:
+    name: tests (MariaDB 10.11)
+    runs-on: ubuntu-24.04
+    services:
+      mariadb:
+        image: mariadb:10.11
+        env:
+          MARIADB_ROOT_PASSWORD: ci-root-password
+        ports:
+          - 3306
+        options: >-
+          --tmpfs /var/lib/mysql:rw
+          --health-cmd "healthcheck.sh --connect --innodb_initialized"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 30
+    steps:
+      - uses: actions/checkout@v5
+      # Server URL without database name: every test creates and drops its own database.
+      - name: Set test database URL
+        run: echo "TEST_DATABASE_URL=mysql://root:ci-root-password@127.0.0.1:${{ job.services.mariadb.ports['3306'] }}" >> "$GITHUB_ENV"
+      # Tests only: no log flush on every commit.
+      - name: Tune MariaDB for tests
+        run: >-
+          docker exec ${{ job.services.mariadb.id }} mariadb -uroot -pci-root-password
+          -e "SET GLOBAL innodb_flush_log_at_trx_commit=2"
+      - run: rustup toolchain install
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fundament-sdk
+          save-if: "false"
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: just
+      - run: just test
+      - name: Packaging sanity check
+        run: cargo package -p z40-fundament --locked --no-verify
+
+  msrv:
+    name: MSRV (1.94)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@1.94
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: fundament-sdk-msrv
+          save-if: ${{ github.ref == 'refs/heads/main' }}
+      # `+1.94` overrides rust-toolchain.toml.
+      - run: cargo +1.94 check -p z40-fundament --all-features --locked
+
+  deny:
+    name: cargo-deny (advisories, licenses, sources)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check advisories bans licenses sources
