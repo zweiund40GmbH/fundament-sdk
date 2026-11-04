@@ -33,7 +33,7 @@ jobs:
     env:
       HAS_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN != '' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - name: Tag commit is on main
@@ -71,7 +71,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - name: Release notes from CHANGELOG.md
         run: |
           version="${GITHUB_REF_NAME#v}"
