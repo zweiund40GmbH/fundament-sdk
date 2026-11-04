@@ -14,6 +14,8 @@ on:
   pull_request:
     paths: ["**", "!**.md", "!LICENSE-*", "docs/configuration.md"]
   workflow_call:
+  # Manual run, e.g. after the very first push of a branch (path filters may skip it).
+  workflow_dispatch:
 
 permissions:
   contents: read
