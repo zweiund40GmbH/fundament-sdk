@@ -2,9 +2,10 @@
 //! in [`crate::protocol::feed`]; this module only sequences IO.
 
 use super::client::{FeedClient, FetchError};
-use super::config::{FeedConsumerConfig, https_origin, loopback_http_origin};
+use super::config::FeedConsumerConfig;
 use super::{CursorStore, PageSink, RunLock, StoreError};
 use crate::credentials::{BearerKey, name_is_valid};
+use crate::http_client::{https_origin, loopback_http_origin};
 use crate::protocol::MAX_PAGE_LIMIT;
 use crate::protocol::feed::parse_page;
 use chrono::Utc;

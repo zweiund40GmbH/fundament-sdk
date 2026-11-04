@@ -4,6 +4,7 @@
 
 use crate::config::{ConfigError, ConfigErrorKind, ConfigVar, Lookup};
 use crate::credentials::BearerKey;
+use crate::http_client::https_origin;
 use std::ops::RangeInclusive;
 use std::time::Duration;
 
@@ -11,44 +12,6 @@ use std::time::Duration;
 pub const DEFAULT_INTERVAL_SECS: u64 = 60;
 /// Allowed range of `<PREFIX>_INTERVAL_SECS`.
 pub const INTERVAL_RANGE: RangeInclusive<u64> = 30..=3600;
-
-/// The origin of `raw` (`scheme://host[:port]`, no trailing slash) if it is exactly an origin of
-/// `scheme`: no user info, no path (one trailing `/` allowed), no query, no fragment.
-fn origin(raw: &str, scheme: &str) -> Option<reqwest::Url> {
-    let raw = raw.trim();
-    // The URL parser silently repairs forms like `https:///host`; the raw text must already be
-    // `scheme://authority` with at most one trailing slash.
-    let rest = raw.strip_prefix(scheme)?.strip_prefix("://")?;
-    if rest.trim_end_matches('/').contains('/') || rest.ends_with("//") {
-        return None;
-    }
-    reqwest::Url::parse(raw).ok().filter(|u| {
-        u.scheme() == scheme
-            && u.host_str().is_some_and(|h| !h.is_empty())
-            && u.username().is_empty()
-            && u.password().is_none()
-            && u.path() == "/"
-            && u.query().is_none()
-            && u.fragment().is_none()
-    })
-}
-
-/// The `https://` origin of `raw`, serialized without trailing slash.
-pub(crate) fn https_origin(raw: &str) -> Option<String> {
-    origin(raw, "https").map(|u| u.origin().ascii_serialization())
-}
-
-/// The `http://` origin of `raw` if its host is a loopback address (tests only).
-pub(crate) fn loopback_http_origin(raw: &str) -> Option<String> {
-    let u = origin(raw, "http")?;
-    let host = u.host_str()?;
-    let ip = host.trim_start_matches('[').trim_end_matches(']');
-    let loopback = host == "localhost"
-        || ip
-            .parse::<std::net::IpAddr>()
-            .is_ok_and(|a| a.is_loopback());
-    loopback.then(|| u.origin().ascii_serialization())
-}
 
 /// Settings of one consumed feed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -206,18 +169,5 @@ mod tests {
             assert_eq!(err.kind, kind);
             assert!(!err.to_string().contains(v), "value echoed: {err}");
         }
-    }
-
-    #[test]
-    fn loopback_only_for_plain_http() {
-        assert_eq!(
-            loopback_http_origin("http://127.0.0.1:8080").as_deref(),
-            Some("http://127.0.0.1:8080")
-        );
-        assert!(loopback_http_origin("http://localhost:1").is_some());
-        assert!(loopback_http_origin("http://[::1]:1").is_some());
-        assert!(loopback_http_origin("http://crm.example.com").is_none());
-        assert!(loopback_http_origin("https://127.0.0.1").is_none());
-        assert!(https_origin("http://127.0.0.1").is_none());
     }
 }

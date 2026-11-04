@@ -43,6 +43,8 @@ pub mod fields;
 pub mod health;
 #[cfg(any(feature = "status", feature = "feed-source"))]
 mod http;
+#[cfg(feature = "feed-consumer")]
+mod http_client;
 pub mod protocol;
 #[cfg(feature = "replica")]
 #[cfg_attr(docsrs, doc(cfg(feature = "replica")))]

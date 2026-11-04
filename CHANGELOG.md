@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Changed
+
+- `feed-consumer`: the HTTP setup (origin check, client builder, bounded body reader, cause chain) moved to a
+  private module so the planned status client can share it; an announced `Content-Length` above the page limit
+  is refused before reading (same result, `Antwort ungültig`).
+
 ## [0.2.1] - 2026-11-04
 
 ### Fixed

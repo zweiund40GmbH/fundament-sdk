@@ -1,9 +1,10 @@
 //! HTTP client of one feed: `GET <origin>/fundament/v1/events`. Returns the raw page; parsing is pure
 //! logic in [`crate::protocol::feed`]. The key goes only into the `Authorization` header; errors carry
 //! the HTTP status at most, never the response body. Redirects are not followed (the key must not
-//! travel to another location).
+//! travel to another location); the HTTP setup is shared with the status client ([`crate::http_client`]).
 
 use crate::credentials::BearerKey;
+use crate::http_client::{self, BodyError};
 use crate::protocol::EVENTS_PATH;
 use std::time::Duration;
 
@@ -59,13 +60,7 @@ impl std::fmt::Debug for FeedClient {
 /// Maps a transport error to [`FetchError::Unreachable`] and logs its cause chain (TLS, DNS, connect …) so
 /// operators can see why; the request carries the key only in a header, so the message never contains it.
 fn unreachable(e: reqwest::Error) -> FetchError {
-    let mut cause = e.to_string();
-    let mut source = std::error::Error::source(&e);
-    while let Some(s) = source {
-        cause.push_str(": ");
-        cause.push_str(&s.to_string());
-        source = s.source();
-    }
+    let cause = http_client::cause_chain(&e);
     tracing::warn!(%cause, "feed source not reachable");
     FetchError::Unreachable
 }
@@ -73,13 +68,7 @@ fn unreachable(e: reqwest::Error) -> FetchError {
 impl FeedClient {
     /// Client for the validated `origin` (no trailing slash). `https_only` refuses plain http.
     pub(crate) fn new(origin: &str, key: BearerKey, https_only: bool) -> reqwest::Result<Self> {
-        let http = reqwest::Client::builder()
-            .connect_timeout(CONNECT_TIMEOUT)
-            .timeout(REQUEST_TIMEOUT)
-            .redirect(reqwest::redirect::Policy::none())
-            .https_only(https_only)
-            .user_agent(concat!("z40-fundament/", env!("CARGO_PKG_VERSION")))
-            .build()?;
+        let http = http_client::build(CONNECT_TIMEOUT, REQUEST_TIMEOUT, https_only)?;
         Ok(Self {
             http,
             url: format!("{origin}{EVENTS_PATH}"),
@@ -98,7 +87,7 @@ impl FeedClient {
         if !types.is_empty() {
             query.push(("types", types.to_owned()));
         }
-        let mut res = self
+        let res = self
             .http
             .get(&self.url)
             .query(&query)
@@ -109,14 +98,12 @@ impl FeedClient {
         if !res.status().is_success() {
             return Err(FetchError::Status(res.status().as_u16()));
         }
-        let mut body = Vec::new();
-        while let Some(chunk) = res.chunk().await.map_err(unreachable)? {
-            if body.len() + chunk.len() > BODY_MAX {
-                return Err(FetchError::Invalid);
-            }
-            body.extend_from_slice(&chunk);
-        }
-        Ok(body)
+        http_client::read_body(res, BODY_MAX)
+            .await
+            .map_err(|e| match e {
+                BodyError::TooLarge => FetchError::Invalid,
+                BodyError::Transport(e) => unreachable(e),
+            })
     }
 }
 
