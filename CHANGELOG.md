@@ -6,7 +6,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
-Planned as 0.2.0 (new features and one breaking change).
+## [0.2.0] - 2026-11-04
 
 ### Changed (breaking)
 
@@ -54,5 +54,6 @@ Planned as 0.2.0 (new features and one breaking change).
 - `replica`: `Mapping`, `KeepFields`, `ReplicaStore`, `Replica` adapter.
 - `replica-mysql`: `MySqlStore` with configurable table prefix and `schema/mysql.sql`.
 
-[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/zweiund40GmbH/fundament-sdk/releases/tag/v0.1.0
