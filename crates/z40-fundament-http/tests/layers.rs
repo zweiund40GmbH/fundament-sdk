@@ -70,7 +70,11 @@ async fn security_headers_on_every_response_and_own_csp_kept() {
             .unwrap()
             .contains("frame-ancestors 'self'")
     );
-    assert!(!res.headers().contains_key(header::X_FRAME_OPTIONS));
+    assert_eq!(
+        res.headers()[header::X_FRAME_OPTIONS],
+        "SAMEORIGIN",
+        "derived from the own CSP"
+    );
 }
 
 #[tokio::test]

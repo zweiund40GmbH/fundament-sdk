@@ -32,6 +32,7 @@ use net::Net;
 use std::convert::Infallible;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use z40_fundament::config::{ConfigError, ConfigVar, Lookup};
 
 /// Name of the forwarding header.
@@ -45,7 +46,9 @@ pub struct TrustedProxies(Arc<[Net]>);
 /// An entry of a proxy list that is neither an address nor a CIDR network. The entry itself is not
 /// part of the message (configuration errors never echo values).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("entry {position} is not an IP address or CIDR network")]
+#[error(
+    "entry {position} is not an IP address or a CIDR network with a prefix length of at least 1"
+)]
 pub struct InvalidProxyList {
     /// 1-based position of the first invalid entry.
     pub position: usize,
@@ -58,7 +61,9 @@ impl TrustedProxies {
         default: None,
         description: "Reverse proxies whose `X-Forwarded-For` is believed, as comma-separated addresses \
                       or CIDR networks (`10.0.0.0/8, fd00::/8`). Unset or empty: no proxy is trusted and \
-                      the TCP peer is the client. List only your own proxies.",
+                      the TCP peer is the client. List only your own proxies: every listed address can \
+                      choose the client address, so a broad range makes `X-Forwarded-For` spoofable \
+                      (prefix length 0 is refused).",
     }];
 
     /// Reads `<prefix>_TRUSTED_PROXIES`.
@@ -138,7 +143,8 @@ fn forwarded_for(headers: &HeaderMap) -> Option<String> {
 }
 
 /// Extractor of the client address. Needs [`TrustedProxies`] in the router state (`FromRef`). Without
-/// `ConnectInfo` (e.g. in tests) the address is `0.0.0.0`, so all such requests share one bucket.
+/// `ConnectInfo` (e.g. in tests) the address is `0.0.0.0`, so all such requests share one bucket; the
+/// first such request logs a warning (like the endpoints of `z40-fundament`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ClientIp(pub IpAddr);
 
@@ -152,9 +158,24 @@ where
     /// Never rejects.
     async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Infallible> {
         let proxies = TrustedProxies::from_ref(state);
-        let ip = proxies.client_ip(parts);
-        Ok(Self(ip.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED))))
+        Ok(Self(
+            proxies.client_ip(parts).unwrap_or_else(unknown_address),
+        ))
     }
+}
+
+/// Whether [`unknown_address`] has warned (once per process).
+static WARNED_UNKNOWN: AtomicBool = AtomicBool::new(false);
+
+/// `0.0.0.0`, with a warning on the first call.
+fn unknown_address() -> IpAddr {
+    if !WARNED_UNKNOWN.swap(true, Ordering::Relaxed) {
+        tracing::warn!(
+            "ClientIp cannot see client addresses: all clients share one address; \
+             serve with into_make_service_with_connect_info"
+        );
+    }
+    IpAddr::V4(Ipv4Addr::UNSPECIFIED)
 }
 
 #[cfg(test)]
@@ -176,6 +197,13 @@ mod tests {
             TrustedProxies::parse("10.0.0.0/8, secret-host").unwrap_err(),
             InvalidProxyList { position: 2 }
         );
+        assert_eq!(
+            TrustedProxies::parse("10.0.0.0/8, fd00::/8, ::/0").unwrap_err(),
+            InvalidProxyList { position: 3 },
+            "trusting everyone is refused"
+        );
+        let all = |k: &str| (k == "APP_TRUSTED_PROXIES").then(|| "0.0.0.0/0".to_owned());
+        assert!(TrustedProxies::from_lookup("APP", all).is_err());
         let env = |k: &str| (k == "APP_TRUSTED_PROXIES").then(|| "proxy.example.com".to_owned());
         let err = TrustedProxies::from_lookup("APP", env).unwrap_err();
         assert_eq!(err.name, "APP_TRUSTED_PROXIES");

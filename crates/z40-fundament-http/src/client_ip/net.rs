@@ -10,7 +10,9 @@ pub(crate) struct Net {
 }
 
 impl Net {
-    /// Parses `10.0.0.0/8`, `fd00::/8` or a single address (full prefix). `None` if invalid.
+    /// Parses `10.0.0.0/8`, `fd00::/8` or a single address (full prefix). `None` if invalid. A prefix
+    /// length of 0 (`0.0.0.0/0`, `::/0`) is refused: it would trust every address, so any client could
+    /// choose its own address through `X-Forwarded-For`.
     pub(crate) fn parse(entry: &str) -> Option<Self> {
         let (addr, prefix) = match entry.split_once('/') {
             Some((a, p)) => (a, Some(p)),
@@ -20,7 +22,7 @@ impl Net {
         let max = if addr.is_ipv4() { 32 } else { 128 };
         let prefix = match prefix {
             Some(p) if !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()) => {
-                p.parse::<u8>().ok().filter(|p| *p <= max)?
+                p.parse::<u8>().ok().filter(|p| (1..=max).contains(p))?
             }
             Some(_) => return None,
             None => max,
@@ -73,8 +75,9 @@ mod tests {
         assert!(v6.contains(ip("fd12::1")) && !v6.contains(ip("fe80::1")));
         let odd = Net::parse("172.16.0.0/12").unwrap();
         assert!(odd.contains(ip("172.31.255.255")) && !odd.contains(ip("172.32.0.0")));
-        assert!(Net::parse("0.0.0.0/0").unwrap().contains(ip("203.0.113.9")));
-        assert!(!Net::parse("0.0.0.0/0").unwrap().contains(ip("2001:db8::1")));
+        let wide = Net::parse("0.0.0.0/1").unwrap();
+        assert!(wide.contains(ip("10.0.0.1")) && !wide.contains(ip("203.0.113.9")));
+        assert!(!wide.contains(ip("::a00:1")), "IPv4 and IPv6 never match");
     }
 
     #[test]
@@ -86,6 +89,9 @@ mod tests {
             "10.0.0.0/",
             "10.0.0.0/+8",
             "10.0.0.0/8/8",
+            "0.0.0.0/0",
+            "::/0",
+            "10.0.0.0/00",
             "",
         ] {
             assert_eq!(Net::parse(bad), None, "{bad}");

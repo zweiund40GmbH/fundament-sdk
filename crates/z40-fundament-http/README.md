@@ -16,10 +16,10 @@ helpers of [`z40-fundament`](https://crates.io/crates/z40-fundament).
 
 | Feature | What it gives you |
 |---|---|
-| *(none)* | `SecurityHeaders` (CSP checked: no `'unsafe-inline'` for scripts, `frame-ancestors` required; `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-*`; no HSTS), `NoStore`, `TrustedProxies` / `ClientIp` (`X-Forwarded-For` only from trusted proxies), `Csrf` (custom header on state-changing requests, exempt paths) |
+| *(none)* | `SecurityHeaders` (CSP checked: no unsafe script sources (`'unsafe-inline'`, `'unsafe-eval'`, `'unsafe-hashes'`, `*`, bare schemes), `frame-ancestors` required and not open; `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-*`; no HSTS), `NoStore`, `TrustedProxies` / `ClientIp` (`X-Forwarded-For` only from trusted proxies), `Csrf` (custom header on state-changing requests, exempt paths) |
 | `request-id` | `RequestIdLayer`: keeps a safe incoming `X-Request-Id` (≤ 64 of `[A-Za-z0-9._:-]`) or creates a UUID v7, echoes it, `RequestId` extension |
-| `trace` | `trace::layer()`: span with method, route template and request id; status and latency at the end; never query strings, headers or bodies |
-| `telemetry` | `TelemetryConfig`: JSON lines or one-line text, `EnvFilter`, from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info`) and `<PREFIX>_LOG_FORMAT` (`json` \| `text`); idempotent `init` |
+| `trace` | `trace::layer()`: span with method, route template (`<unmatched>` for unknown routes, raw path only on opt-in) and request id; status and latency at the end; never query strings, headers or bodies |
+| `telemetry` | `TelemetryConfig`: JSON lines or one-line text, `EnvFilter`, from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info`) and `<PREFIX>_LOG_FORMAT` (`json` \| `text`); `init` reports what it did (installed, installed without `log` bridge, already installed) |
 
 ## Quick start
 
@@ -57,7 +57,7 @@ axum::serve(listener, app.into_make_service_with_connect_info::<std::net::Socket
 - **CSRF answer:** `403 {"code":"CSRF","message":"Anfrage abgelehnt (CSRF-Schutz). Bitte laden Sie die Seite
   neu."}` – the error form and German fixed texts of the `z40-fundament` endpoints. Apps with their own error
   shape pass `.rejection(|| …)`; apps with another check (e.g. a double-submit cookie) use `Csrf::check(…)`.
-- **CSP per route group:** headers are only added when missing. A route that sets its own CSP keeps it; a
+- **CSP per route group:** headers are only added when missing. A route that sets its own CSP keeps it (`X-Frame-Options` then follows its `frame-ancestors`); a
   router group gets its own `SecurityHeaders` layer before it is merged.
 - **HSTS** is the job of the edge proxy that terminates TLS.
 

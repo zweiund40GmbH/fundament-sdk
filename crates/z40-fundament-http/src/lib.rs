@@ -7,7 +7,7 @@
 //!
 //! Always available (no feature):
 //!
-//! * [`security_headers`] – CSP (checked: no `'unsafe-inline'` for scripts, `frame-ancestors` required),
+//! * [`security_headers`] – CSP (checked: no unsafe script sources, `frame-ancestors` required and not open),
 //!   `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-*`; no HSTS
 //! * [`no_store`] – `Cache-Control: no-store` for chosen paths
 //! * [`client_ip`] – client address with `X-Forwarded-For` only from trusted proxies; extractor and a

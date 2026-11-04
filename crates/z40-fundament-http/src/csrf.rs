@@ -45,6 +45,16 @@ pub const CODE: &str = "CSRF";
 /// `message` of the default answer (German fixed text, like the other wire texts).
 pub const MESSAGE: &str = "Anfrage abgelehnt (CSRF-Schutz). Bitte laden Sie die Seite neu.";
 
+/// Header names a cross-site request may send without a CORS preflight (Fetch standard, safelisted
+/// request headers); they prove nothing.
+pub const CORS_SAFELISTED: [&str; 5] = [
+    "accept",
+    "accept-language",
+    "content-language",
+    "content-type",
+    "range",
+];
+
 /// A custom check: `true` lets the request pass.
 pub type CsrfCheck = Arc<dyn Fn(&HeaderMap) -> bool + Send + Sync>;
 /// Builds the answer for a rejected request.
@@ -54,7 +64,9 @@ pub type CsrfRejection = Arc<dyn Fn() -> Response + Send + Sync>;
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum CsrfConfigError {
-    /// The header name is not a valid HTTP header name.
+    /// The header name is not a valid HTTP header name, or a CORS-safelisted one (`accept`,
+    /// `accept-language`, `content-language`, `content-type`, `range`), which a cross-site request may
+    /// send without a preflight.
     #[error("invalid CSRF header name")]
     Name,
     /// The value is empty or not a visible ASCII header value.
@@ -87,9 +99,13 @@ impl std::fmt::Debug for Csrf {
 }
 
 impl Csrf {
-    /// Requires header `name` with exactly `value` (byte comparison, case-sensitive value).
+    /// Requires header `name` with exactly `value` (byte comparison, case-sensitive value). A
+    /// CORS-safelisted name ([`CORS_SAFELISTED`]) is refused.
     pub fn header(name: &str, value: &str) -> Result<Self, CsrfConfigError> {
         let name = HeaderName::try_from(name)?;
+        if CORS_SAFELISTED.contains(&name.as_str()) {
+            return Err(CsrfConfigError::Name);
+        }
         let ok = !value.is_empty() && value.bytes().all(|b| b.is_ascii_graphic());
         let value = HeaderValue::from_str(value)
             .ok()
@@ -110,7 +126,8 @@ impl Csrf {
         }
     }
 
-    /// Checks only paths starting with `prefix` (e.g. `/api/`); without such a rule every path is checked.
+    /// Checks only paths below `prefix` (e.g. `/api/`, matched at segment boundaries: `/auth` covers
+    /// `/auth/logout`, not `/authority`); without such a rule every path is checked.
     pub fn protect_prefix(mut self, prefix: &str) -> Self {
         Arc::make_mut(&mut self.scope).only.add_prefix(prefix);
         self
@@ -128,7 +145,8 @@ impl Csrf {
         self
     }
 
-    /// Never checks paths starting with `prefix` (e.g. `/fundament/`, which uses bearer keys).
+    /// Never checks paths below `prefix` (e.g. `/fundament/`, which uses bearer keys; segment boundaries
+    /// as in [`Csrf::protect_prefix`]).
     pub fn exempt_prefix(mut self, prefix: &str) -> Self {
         Arc::make_mut(&mut self.scope).except.add_prefix(prefix);
         self
@@ -237,6 +255,22 @@ mod tests {
 
     #[test]
     fn invalid_configuration() {
+        for safelisted in [
+            "Content-Type",
+            "accept",
+            "accept-language",
+            "content-language",
+            "range",
+        ] {
+            assert_eq!(
+                Csrf::header(safelisted, "crm").unwrap_err(),
+                CsrfConfigError::Name,
+                "{safelisted}"
+            );
+        }
+        let c = Csrf::header("x-csrf", "1").unwrap().protect_prefix("/auth");
+        assert!(c.requires_check(&Method::POST, "/auth/logout"));
+        assert!(!c.requires_check(&Method::POST, "/authority"));
         assert_eq!(
             Csrf::header("bad name", "x").unwrap_err(),
             CsrfConfigError::Name

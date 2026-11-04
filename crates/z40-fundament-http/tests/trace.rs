@@ -2,13 +2,14 @@
 #![cfg(all(feature = "request-id", feature = "trace"))]
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use axum::response::Response;
 use axum::routing::{get, post};
-use std::io::Write;
-use std::sync::{Arc, Mutex};
+use common::capture_logs;
 use tower::ServiceExt;
 use z40_fundament_http::request_id::{HEADER, RequestId, RequestIdLayer};
 use z40_fundament_http::trace;
@@ -59,30 +60,9 @@ async fn invalid_id_is_replaced_and_missing_id_generated() {
     }
 }
 
-/// A `Write` into a shared buffer for the test subscriber.
-#[derive(Clone, Default)]
-struct Capture(Arc<Mutex<Vec<u8>>>);
-
-impl Write for Capture {
-    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
-        Ok(buf.len())
-    }
-    fn flush(&mut self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 #[tokio::test]
 async fn trace_never_logs_query_headers_or_bodies() {
-    let capture = Capture::default();
-    let writer = capture.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(move || writer.clone())
-        .with_max_level(tracing::Level::TRACE)
-        .with_ansi(false)
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let (capture, _guard) = capture_logs();
 
     let get = Request::get("/api/orders/order-77?code=oauth-code-secret&state=st4te")
         .header(HEADER, "trace-id-1")
@@ -101,7 +81,7 @@ async fn trace_never_logs_query_headers_or_bodies() {
         .unwrap();
     assert_eq!(send(missing).await.status(), StatusCode::NOT_FOUND);
 
-    let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
+    let logs = capture.text();
     assert!(logs.contains("route=/api/orders/{id}"), "{logs}");
     assert!(logs.contains("request_id=trace-id-1"), "{logs}");
     assert!(
@@ -113,7 +93,7 @@ async fn trace_never_logs_query_headers_or_bodies() {
         "{logs}"
     );
     assert!(
-        logs.contains("route=/nowhere/x") && logs.contains("status=404"),
+        logs.contains("route=<unmatched>") && logs.contains("status=404"),
         "{logs}"
     );
     for secret in [
@@ -125,6 +105,7 @@ async fn trace_never_logs_query_headers_or_bodies() {
         "key-secret",
         "body-secret",
         "query-secret",
+        "nowhere",
         "?",
     ] {
         assert!(!logs.contains(secret), "{secret} leaked: {logs}");
@@ -133,13 +114,7 @@ async fn trace_never_logs_query_headers_or_bodies() {
 
 #[tokio::test]
 async fn unsafe_incoming_id_is_not_logged_without_the_request_id_layer() {
-    let capture = Capture::default();
-    let writer = capture.clone();
-    let subscriber = tracing_subscriber::fmt()
-        .with_writer(move || writer.clone())
-        .with_ansi(false)
-        .finish();
-    let _guard = tracing::subscriber::set_default(subscriber);
+    let (capture, _guard) = capture_logs();
     let app = Router::new()
         .route("/", get(|| async { "" }))
         .layer(trace::layer());
@@ -148,7 +123,30 @@ async fn unsafe_incoming_id_is_not_logged_without_the_request_id_layer() {
         .body(Body::empty())
         .unwrap();
     app.oneshot(req).await.unwrap();
-    let logs = String::from_utf8(capture.0.lock().unwrap().clone()).unwrap();
+    let logs = capture.text();
     assert!(logs.contains("finished processing request"), "{logs}");
     assert!(!logs.contains("injected"), "{logs}");
+}
+
+#[tokio::test]
+async fn unmatched_path_only_on_opt_in_and_truncated() {
+    let (capture, _guard) = capture_logs();
+    let app = Router::new()
+        .route("/", get(|| async { "" }))
+        .layer(trace::layer_with(
+            trace::RouteSpan::new().log_unmatched_path(12),
+        ));
+    let req = Request::get("/unknown/abcdefgh-token?q=query-secret")
+        .body(Body::empty())
+        .unwrap();
+    assert_eq!(
+        app.oneshot(req).await.unwrap().status(),
+        StatusCode::NOT_FOUND
+    );
+    let logs = capture.text();
+    assert!(logs.contains("route=/unknown/abc "), "{logs}");
+    assert!(
+        !logs.contains("defgh") && !logs.contains("query-secret"),
+        "{logs}"
+    );
 }

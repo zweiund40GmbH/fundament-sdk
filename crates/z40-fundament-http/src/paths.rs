@@ -20,7 +20,8 @@ impl PathSet {
         self.exact.push(path.into());
     }
 
-    /// Adds the prefix `prefix` (e.g. `/api/` matches `/api/x`, not `/apix`).
+    /// Adds the prefix `prefix`. Prefixes match at path segment boundaries only: `/api/` and `/api`
+    /// both match `/api/x`, `/api` also matches `/api` itself, neither matches `/apix` or `/api-docs`.
     pub(crate) fn add_prefix(&mut self, prefix: &str) {
         self.prefixes.push(prefix.into());
     }
@@ -33,7 +34,15 @@ impl PathSet {
     /// Whether `path` is one of the exact paths or starts with one of the prefixes.
     pub(crate) fn matches(&self, path: &str) -> bool {
         self.exact.iter().any(|p| **p == *path)
-            || self.prefixes.iter().any(|p| path.starts_with(&**p))
+            || self.prefixes.iter().any(|p| prefix_matches(p, path))
+    }
+}
+
+/// Whether `path` starts with `prefix` at a segment boundary (see [`PathSet::add_prefix`]).
+fn prefix_matches(prefix: &str, path: &str) -> bool {
+    match path.strip_prefix(prefix) {
+        None => false,
+        Some(rest) => prefix.ends_with('/') || rest.is_empty() || rest.starts_with('/'),
     }
 }
 
@@ -65,6 +74,16 @@ mod tests {
         s.add_path("/auth/logout");
         assert!(s.matches("/api/x") && s.matches("/auth/logout"));
         assert!(!s.matches("/apix") && !s.matches("/auth/logout/x") && !s.matches("/api"));
+    }
+
+    #[test]
+    fn prefixes_match_at_segment_boundaries() {
+        let mut s = PathSet::default();
+        s.add_prefix("/auth");
+        assert!(s.matches("/auth") && s.matches("/auth/") && s.matches("/auth/logout"));
+        assert!(!s.matches("/authority") && !s.matches("/auth-x") && !s.matches("/aut"));
+        s.add_prefix("/");
+        assert!(s.matches("/anything"), "the root prefix covers everything");
     }
 
     #[test]

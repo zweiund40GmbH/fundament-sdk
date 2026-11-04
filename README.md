@@ -42,10 +42,10 @@ z40-fundament-http = { version = "0.4", features = ["request-id", "trace", "tele
 
 | Feature | What it gives you |
 |---|---|
-| *(none)* | `SecurityHeaders` (CSP checked: no `'unsafe-inline'` for scripts, `frame-ancestors` required; `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-*`; no HSTS), `NoStore`, `TrustedProxies` / `ClientIp` (`X-Forwarded-For` only from trusted proxies, also as `client_ip` function of the endpoints above), `Csrf` (custom header on state-changing requests, exempt paths, `403 {"code":"CSRF",…}` or the app's own answer) |
+| *(none)* | `SecurityHeaders` (CSP checked: no unsafe script sources (`'unsafe-inline'`, `'unsafe-eval'`, `'unsafe-hashes'`, `*`, bare schemes), `frame-ancestors` required and not open; `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-*`; no HSTS), `NoStore`, `TrustedProxies` / `ClientIp` (`X-Forwarded-For` only from trusted proxies, also as `client_ip` function of the endpoints above), `Csrf` (custom header on state-changing requests, exempt paths, `403 {"code":"CSRF",…}` or the app's own answer) |
 | `request-id` | `RequestIdLayer`: keeps a safe incoming `X-Request-Id` or creates a UUID v7, echoes it |
-| `trace` | `trace::layer()`: method, route template, request id, status, latency – never query strings, headers or bodies |
-| `telemetry` | `TelemetryConfig`: JSON or one-line text logs from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info`) / `<PREFIX>_LOG_FORMAT` (`json` \| `text`), idempotent `init` |
+| `trace` | `trace::layer()`: method, route template (`<unmatched>` for unknown routes), request id, status, latency – never query strings, headers or bodies |
+| `telemetry` | `TelemetryConfig`: JSON or one-line text logs from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info`) / `<PREFIX>_LOG_FORMAT` (`json` \| `text`), `init` that reports what it did |
 
 Usage and layer order: [crate README](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament-http/README.md).
 

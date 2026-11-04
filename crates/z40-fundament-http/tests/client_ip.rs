@@ -1,6 +1,8 @@
 //! The client address through axum: direct peer, trusted proxy chain, spoofing attempts, IPv6.
 #![allow(clippy::unwrap_used)]
 
+mod common;
+
 use axum::Router;
 use axum::body::Body;
 use axum::extract::{ConnectInfo, FromRef};
@@ -124,7 +126,16 @@ async fn ipv6() {
 
 #[tokio::test]
 async fn without_connect_info() {
+    let (logs, _guard) = common::capture_logs();
     assert_eq!(seen(PROXIES, None, &["198.51.100.7"]).await, "0.0.0.0");
+    assert_eq!(seen(PROXIES, None, &[]).await, "0.0.0.0");
+    let text = logs.text();
+    assert_eq!(
+        text.matches("cannot see client addresses").count(),
+        1,
+        "warns once: {text}"
+    );
+    assert!(text.contains("WARN"), "{text}");
     let parts: Parts = Request::builder().body(()).unwrap().into_parts().0;
     let resolve = TrustedProxies::parse(PROXIES).unwrap().resolver();
     assert_eq!(

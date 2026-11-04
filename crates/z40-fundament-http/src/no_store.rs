@@ -34,7 +34,8 @@ impl NoStore {
         Self::default()
     }
 
-    /// Also applies to paths starting with `prefix` (e.g. `/api/`); the first rule narrows from "all".
+    /// Applies to paths below `prefix` (e.g. `/api/`; matched at segment boundaries, so `/auth` covers
+    /// `/auth/logout`, not `/authority`). The first path rule turns "every response" into "only these".
     pub fn prefix(mut self, prefix: &str) -> Self {
         Arc::make_mut(&mut self.scope).only.add_prefix(prefix);
         self
@@ -52,7 +53,7 @@ impl NoStore {
         self
     }
 
-    /// Never applies to paths starting with `prefix`.
+    /// Never applies to paths below `prefix` (segment boundaries as in [`NoStore::prefix`]).
     pub fn except_prefix(mut self, prefix: &str) -> Self {
         Arc::make_mut(&mut self.scope).except.add_prefix(prefix);
         self

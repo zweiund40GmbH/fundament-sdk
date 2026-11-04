@@ -56,7 +56,7 @@ Read with `TrustedProxies::from_lookup(prefix, lookup)`.
 
 | Variable | Default | Description |
 |---|---|---|
-| `<PREFIX>_TRUSTED_PROXIES` | (unset) | Reverse proxies whose `X-Forwarded-For` is believed, as comma-separated addresses or CIDR networks (`10.0.0.0/8, fd00::/8`). Unset or empty: no proxy is trusted and the TCP peer is the client. List only your own proxies. |
+| `<PREFIX>_TRUSTED_PROXIES` | (unset) | Reverse proxies whose `X-Forwarded-For` is believed, as comma-separated addresses or CIDR networks (`10.0.0.0/8, fd00::/8`). Unset or empty: no proxy is trusted and the TCP peer is the client. List only your own proxies: every listed address can choose the client address, so a broad range makes `X-Forwarded-For` spoofable (prefix length 0 is refused). |
 
 ### Log setup (`z40-fundament-http`, feature `telemetry`)
 

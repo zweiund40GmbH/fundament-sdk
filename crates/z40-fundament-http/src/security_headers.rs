@@ -4,7 +4,9 @@
 //!
 //! **Only missing headers are added.** A route that needs another policy (a preview page that may be
 //! framed by the app itself, a development tool) sets its own `Content-Security-Policy`; the layer then
-//! keeps it and leaves `X-Frame-Options` alone. For a different CSP per route group, add a second
+//! keeps it and derives `X-Frame-Options` from **that** policy's `frame-ancestors` (`'none'` → `DENY`,
+//! `'self'` → `SAMEORIGIN`, anything else → not sent). A route's own CSP is not checked here; test it
+//! with [`check_csp`]. For a different CSP per route group, add a second
 //! [`SecurityHeaders`] layer to that group's router before merging it: the inner layer runs first and
 //! the outer one only fills what is still missing.
 //!
@@ -143,12 +145,15 @@ impl SecurityHeaders {
                 h.entry(name).or_insert_with(|| value.clone());
             }
         }
-        if !h.contains_key(header::CONTENT_SECURITY_POLICY) {
-            h.insert(header::CONTENT_SECURITY_POLICY, v.csp.clone());
-            if let Some(xfo) = &v.frame_options {
-                h.entry(header::X_FRAME_OPTIONS)
-                    .or_insert_with(|| xfo.clone());
+        let frame_options = match h.get(header::CONTENT_SECURITY_POLICY) {
+            Some(own) => own.to_str().ok().and_then(csp::frame_options),
+            None => {
+                h.insert(header::CONTENT_SECURITY_POLICY, v.csp.clone());
+                v.frame_options.clone()
             }
+        };
+        if let Some(xfo) = frame_options {
+            h.entry(header::X_FRAME_OPTIONS).or_insert(xfo);
         }
     }
 }
@@ -196,10 +201,25 @@ mod tests {
             own[header::CONTENT_SECURITY_POLICY],
             "frame-ancestors 'self'"
         );
-        assert!(
-            !own.contains_key(header::X_FRAME_OPTIONS),
-            "the route's CSP decides about framing"
+        assert_eq!(
+            own[header::X_FRAME_OPTIONS],
+            "SAMEORIGIN",
+            "derived from the route's CSP"
         );
+        let mut open = HeaderMap::new();
+        open.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("frame-ancestors https://example.com"),
+        );
+        s.apply(&mut open);
+        assert!(!open.contains_key(header::X_FRAME_OPTIONS));
+        let mut deny = HeaderMap::new();
+        deny.insert(
+            header::CONTENT_SECURITY_POLICY,
+            HeaderValue::from_static("default-src 'self'; frame-ancestors 'none'"),
+        );
+        s.apply(&mut deny);
+        assert_eq!(deny[header::X_FRAME_OPTIONS], "DENY");
         assert_eq!(own[header::X_CONTENT_TYPE_OPTIONS], "nosniff");
     }
 

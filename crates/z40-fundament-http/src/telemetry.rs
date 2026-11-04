@@ -104,21 +104,51 @@ impl TelemetryConfig {
     }
 
     /// Installs the global subscriber; see [`init`].
-    pub fn init(&self) -> Result<bool, InvalidFilter> {
+    pub fn init(&self) -> Result<InitOutcome, InvalidFilter> {
         init(self.format, &self.filter)
     }
 }
 
-/// Installs the global subscriber with `format` and `filter` (also forwarding records of the `log`
-/// crate). Idempotent: `Ok(false)` when a subscriber is already installed (a second call, a test
-/// harness), which then stays.
-pub fn init(format: LogFormat, filter: &str) -> Result<bool, InvalidFilter> {
+/// What [`init`] did.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum InitOutcome {
+    /// This call installed the subscriber; records of the `log` crate are forwarded to it.
+    Installed,
+    /// This call installed the subscriber, but another `log` logger was already set, so records of the
+    /// `log` crate keep going there.
+    InstalledWithoutLog,
+    /// A global subscriber was already set (an earlier call, a test harness); it stays, nothing changed.
+    AlreadyInstalled,
+}
+
+/// Installs the global subscriber with `format` and `filter` and forwards records of the `log` crate to
+/// it. Idempotent: a second call returns [`InitOutcome::AlreadyInstalled`].
+pub fn init(format: LogFormat, filter: &str) -> Result<InitOutcome, InvalidFilter> {
     let builder = tracing_subscriber::fmt().with_env_filter(build_filter(filter)?);
-    let result = match format {
-        LogFormat::Json => builder.json().flatten_event(true).try_init(),
-        LogFormat::Text => builder.try_init(),
+    let installed = match format {
+        LogFormat::Json => set_global(builder.json().flatten_event(true).finish()),
+        LogFormat::Text => set_global(builder.finish()),
     };
-    Ok(result.is_ok())
+    if !installed {
+        return Ok(InitOutcome::AlreadyInstalled);
+    }
+    // After the subscriber, so the `log` bridge gets its level (as tracing-subscriber's `try_init`).
+    let level = tracing_log::AsLog::as_log(&tracing::level_filters::LevelFilter::current());
+    let bridged = tracing_log::LogTracer::builder()
+        .with_max_level(level)
+        .init()
+        .is_ok();
+    Ok(if bridged {
+        InitOutcome::Installed
+    } else {
+        InitOutcome::InstalledWithoutLog
+    })
+}
+
+/// Sets `subscriber` as the global default; `false` if one is already set.
+fn set_global(subscriber: impl tracing::Subscriber + Send + Sync + 'static) -> bool {
+    tracing::subscriber::set_global_default(subscriber).is_ok()
 }
 
 /// The `EnvFilter` of `directive`.
@@ -212,11 +242,15 @@ mod tests {
 
     #[test]
     fn init_is_idempotent() {
-        let first = init(LogFormat::Json, "warn").unwrap();
-        assert!(
-            !init(LogFormat::Text, "warn").unwrap(),
+        // The only test of this binary that touches the global subscriber.
+        assert_eq!(
+            init(LogFormat::Json, "warn").unwrap(),
+            InitOutcome::Installed
+        );
+        assert_eq!(
+            init(LogFormat::Text, "warn").unwrap(),
+            InitOutcome::AlreadyInstalled,
             "second call keeps the first subscriber"
         );
-        let _ = first;
     }
 }
