@@ -30,7 +30,7 @@ Thank you for helping. This file describes how code gets into this repository.
 ## Development
 
 ```bash
-just check        # the full gate: fmt, clippy (each feature alone and all), tests, docs, file sizes, MSRV
+just check        # the full gate: fmt, clippy (each crate, each feature alone and all), tests, docs, file sizes, MSRV
 just test         # tests only
 just config-doc   # regenerate docs/configuration.md
 just deny         # cargo-deny (advisories, licenses, sources)
@@ -59,13 +59,18 @@ The toolchain for development is pinned in `rust-toolchain.toml`; the minimum su
 ## Release process
 
 1. Move the *Unreleased* entries in `CHANGELOG.md` to a new version section and bump `version` in the
-   workspace `Cargo.toml` (SemVer; before `1.0` a breaking change bumps the minor version).
+   workspace `Cargo.toml` (SemVer; before `1.0` a breaking change bumps the minor version). Both crates share
+   the version: bump the `z40-fundament` requirement in `crates/z40-fundament-http/Cargo.toml` (dependency
+   and dev-dependency) to the same version.
 2. Merge to `main`, then tag the commit `vX.Y.Z` and push the tag.
 3. The `release` workflow checks that the tag is on `main` and matches the version, runs the gate,
-   publishes `z40-fundament` to crates.io and creates the GitHub release from the changelog section.
+   publishes `z40-fundament` and then `z40-fundament-http` to crates.io (a crate whose version is already
+   published is skipped, so a failed run can be repeated) and creates the GitHub release from the changelog
+   section.
 
 Publishing uses crates.io **Trusted Publishing** (OIDC, no stored token): the repository, the workflow
 `release.yml` and the environment `release` are registered as trusted publisher of the crate on crates.io.
-The first version of a new crate cannot be published that way; for it (or if OIDC is unavailable) set the
-repository secret `CARGO_REGISTRY_TOKEN` (a token scoped to publishing `z40-fundament`), which then takes
-precedence. Remove the secret again afterwards.
+Each crate is registered on its own. The first version of a new crate (e.g. `z40-fundament-http`) cannot be
+published that way; for it (or if OIDC is unavailable) set the repository secret `CARGO_REGISTRY_TOKEN` (a
+token scoped to publishing the crates of this repository), which then takes precedence. Remove the secret
+again afterwards and register the trusted publisher of the new crate.

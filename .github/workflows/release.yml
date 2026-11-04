@@ -1,10 +1,11 @@
-# Release of z40-fundament on a tag `vX.Y.Z`: the CI gate, then publishing to crates.io, then the
-# GitHub release with the changelog section of the version. The tag must point to a commit on `main`
-# and match the crate version.
+# Release of the crates (z40-fundament, then z40-fundament-http, which depends on it) on a tag `vX.Y.Z`:
+# the CI gate, then publishing to crates.io, then the GitHub release with the changelog section of the
+# version. The tag must point to a commit on `main` and match the workspace version.
 #
 # Publishing: crates.io Trusted Publishing (OIDC, no stored token) is the default – register this
-# repository and workflow `release.yml` (environment `release`) as trusted publisher of z40-fundament on
-# crates.io. Fallback: if the secret CARGO_REGISTRY_TOKEN is set, it is used instead.
+# repository and workflow `release.yml` (environment `release`) as trusted publisher of each crate on
+# crates.io. Fallback: if the secret CARGO_REGISTRY_TOKEN is set, it is used instead (needed for the first
+# version of a new crate). A crate whose version is already on crates.io is skipped, so re-runs are safe.
 name: Release
 
 on:
@@ -55,9 +56,21 @@ jobs:
       - uses: rust-lang/crates-io-auth-action@v1
         id: auth
         if: env.HAS_TOKEN != 'true'
-      - run: cargo publish -p z40-fundament --locked
+      # Dependency order; `cargo publish` waits until a crate is in the index before the next one.
+      - name: Publish the crates
         env:
           CARGO_REGISTRY_TOKEN: ${{ steps.auth.outputs.token || secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          version="${GITHUB_REF_NAME#v}"
+          for crate in z40-fundament z40-fundament-http; do
+            status="$(curl -sS -o /dev/null -w '%{http_code}' -A 'fundament-sdk release workflow' \
+              "https://crates.io/api/v1/crates/${crate}/${version}")"
+            if [ "$status" = "200" ]; then
+              echo "${crate} ${version} is already published, skipping"
+              continue
+            fi
+            cargo publish -p "$crate" --locked
+          done
       # npm packages come later; publishing them would be a step here, e.g.:
       # - uses: actions/setup-node@v5
       #   with: { node-version: 24, registry-url: "https://registry.npmjs.org" }

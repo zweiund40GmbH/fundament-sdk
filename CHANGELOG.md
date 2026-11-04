@@ -35,6 +35,8 @@ Planned as 0.4.0 for both crates.
   - `telemetry` (feature): `TelemetryConfig` (`<PREFIX>_LOG`, `<PREFIX>_LOG_FORMAT` = `json` | `pretty`) and an
     idempotent `init`.
 - `docs/configuration.md` gains a generated section for `z40-fundament-http`.
+- The release workflow publishes `z40-fundament-http` after `z40-fundament` and skips a crate whose version is
+  already on crates.io.
 
 ## [0.3.0] - 2026-11-04
 

@@ -89,7 +89,7 @@ jobs:
         run: test -n "${TEST_DATABASE_URL:-}" || { echo "::error::TEST_DATABASE_URL is empty"; exit 1; }
       - run: just test
       - name: Packaging sanity check
-        run: cargo package -p z40-fundament --locked --no-verify
+        run: just package
 
   msrv:
     name: MSRV (1.94)
@@ -102,7 +102,7 @@ jobs:
           shared-key: fundament-sdk-msrv
           save-if: ${{ github.ref == 'refs/heads/main' }}
       # `+1.94` overrides rust-toolchain.toml.
-      - run: cargo +1.94 check -p z40-fundament --all-features --locked
+      - run: cargo +1.94 check --workspace --all-features --locked
 
   deny:
     name: cargo-deny (advisories, licenses, sources)
