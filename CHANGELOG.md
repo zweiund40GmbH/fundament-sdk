@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-04
+
 ### Added
 
 - `status-client` (new feature): `StatusClient` reads `GET /fundament/v1/status` of another app (`https` only,
@@ -85,7 +87,8 @@ All notable changes to this project are documented in this file. The format is b
 - `replica`: `Mapping`, `KeepFields`, `ReplicaStore`, `Replica` adapter.
 - `replica-mysql`: `MySqlStore` with configurable table prefix and `schema/mysql.sql`.
 
-[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/zweiund40GmbH/fundament-sdk/releases/tag/v0.1.0

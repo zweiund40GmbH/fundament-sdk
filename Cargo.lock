@@ -2163,7 +2163,7 @@ dependencies = [
 
 [[package]]
 name = "z40-fundament"
-version = "0.2.1"
+version = "0.3.0"
 dependencies = [
  "axum",
  "chrono",
