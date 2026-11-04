@@ -64,6 +64,6 @@ Read with `TelemetryConfig::from_lookup(prefix, lookup)`.
 
 | Variable | Default | Description |
 |---|---|---|
-| `<PREFIX>_LOG` | `info` | Log filter as `EnvFilter` directive, e.g. `info,sqlx=warn` or `debug`. An invalid directive is a configuration error. |
-| `<PREFIX>_LOG_FORMAT` | `json` | `json` (one JSON object per line, for log collectors) or `pretty` (readable text for local work). |
+| `<PREFIX>_LOG` | `info` | Log filter as `EnvFilter` directive, e.g. `info,sqlx=warn` or `debug`. Unset or empty: `RUST_LOG`, then `info`. An invalid directive is a configuration error. |
+| `<PREFIX>_LOG_FORMAT` | `json` | `json` (one JSON object per line, for log collectors) or `text` (readable text, one line per event, for local work). |
 <!-- END GENERATED (z40-fundament-http) -->

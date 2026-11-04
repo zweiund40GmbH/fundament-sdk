@@ -19,7 +19,7 @@ helpers of [`z40-fundament`](https://crates.io/crates/z40-fundament).
 | *(none)* | `SecurityHeaders` (CSP checked: no `'unsafe-inline'` for scripts, `frame-ancestors` required; `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-*`; no HSTS), `NoStore`, `TrustedProxies` / `ClientIp` (`X-Forwarded-For` only from trusted proxies), `Csrf` (custom header on state-changing requests, exempt paths) |
 | `request-id` | `RequestIdLayer`: keeps a safe incoming `X-Request-Id` (≤ 64 of `[A-Za-z0-9._:-]`) or creates a UUID v7, echoes it, `RequestId` extension |
 | `trace` | `trace::layer()`: span with method, route template and request id; status and latency at the end; never query strings, headers or bodies |
-| `telemetry` | `TelemetryConfig`: JSON lines or readable text, `EnvFilter`, from `<PREFIX>_LOG` and `<PREFIX>_LOG_FORMAT`; idempotent `init` |
+| `telemetry` | `TelemetryConfig`: JSON lines or one-line text, `EnvFilter`, from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info`) and `<PREFIX>_LOG_FORMAT` (`json` \| `text`); idempotent `init` |
 
 ## Quick start
 
@@ -38,7 +38,7 @@ use z40_fundament_http::telemetry::TelemetryConfig;
 use z40_fundament_http::trace;
 
 let env = |k: &str| std::env::var(k).ok();
-TelemetryConfig::from_lookup("APP", env)?.init()?;      // APP_LOG, APP_LOG_FORMAT
+TelemetryConfig::from_lookup("APP", env)?.init()?;      // APP_LOG (else RUST_LOG, else info), APP_LOG_FORMAT
 let proxies = TrustedProxies::from_lookup("APP", env)?; // APP_TRUSTED_PROXIES
 
 // The last `layer` call runs first: request id → trace → headers → no-store → CSRF → routes.

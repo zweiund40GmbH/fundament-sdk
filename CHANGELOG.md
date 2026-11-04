@@ -32,8 +32,8 @@ Planned as 0.4.0 for both crates.
     response.
   - `trace` (feature): `trace::layer()` with a span of method, route template and request id, and status and
     latency at the end; query strings, headers and bodies are never recorded.
-  - `telemetry` (feature): `TelemetryConfig` (`<PREFIX>_LOG`, `<PREFIX>_LOG_FORMAT` = `json` | `pretty`) and an
-    idempotent `init`.
+  - `telemetry` (feature): `TelemetryConfig` (`<PREFIX>_LOG`, falling back to `RUST_LOG`, then `info`;
+    `<PREFIX>_LOG_FORMAT` = `json` | `text`) and an idempotent `init`.
 - `docs/configuration.md` gains a generated section for `z40-fundament-http`.
 - The release workflow publishes `z40-fundament-http` after `z40-fundament` and skips a crate whose version is
   already on crates.io.

@@ -21,7 +21,7 @@
 //! * `request-id` → [`request_id::RequestIdLayer`] – keep a safe incoming `X-Request-Id` or create a
 //!   UUID v7, echo it
 //! * `trace` → [`trace`] – the trace layer (method, route template, request id, status, latency)
-//! * `telemetry` → [`telemetry`] – JSON or readable logs from `<PREFIX>_LOG` / `<PREFIX>_LOG_FORMAT`
+//! * `telemetry` → [`telemetry`] – JSON or one-line text logs from `<PREFIX>_LOG` / `<PREFIX>_LOG_FORMAT`
 //!
 //! The layers are made for axum's `Router::layer`. A typical order (the last `layer` call runs first):
 //!

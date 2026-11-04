@@ -1,6 +1,9 @@
 //! Global log setup: JSON lines (one object per event, with the current span such as `request_id`) for
-//! production, readable multi-line text for local work, filtered by an `EnvFilter` directive
+//! production, readable one-line text for local work, filtered by an `EnvFilter` directive
 //! (`info,sqlx=warn`). Read from `<PREFIX>_LOG` and `<PREFIX>_LOG_FORMAT`.
+//!
+//! The filter is taken from `<PREFIX>_LOG`; when that is unset or empty, from `RUST_LOG` (so existing
+//! deployments keep working), and otherwise it is [`DEFAULT_FILTER`].
 //!
 //! ```no_run
 //! use z40_fundament_http::telemetry::TelemetryConfig;
@@ -25,8 +28,8 @@ pub enum LogFormat {
     /// One JSON object per line (default: the safe choice for log collectors).
     #[default]
     Json,
-    /// Readable multi-line text for a terminal.
-    Pretty,
+    /// Readable text, one line per event (tracing-subscriber's default format).
+    Text,
 }
 
 /// A filter directive that `EnvFilter` does not accept. The directive is not part of the message.
@@ -59,33 +62,43 @@ impl TelemetryConfig {
         ConfigVar {
             suffix: "LOG",
             default: Some(DEFAULT_FILTER),
-            description: "Log filter as `EnvFilter` directive, e.g. `info,sqlx=warn` or `debug`. An invalid \
-                          directive is a configuration error.",
+            description: "Log filter as `EnvFilter` directive, e.g. `info,sqlx=warn` or `debug`. Unset or \
+                          empty: `RUST_LOG`, then `info`. An invalid directive is a configuration error.",
         },
         ConfigVar {
             suffix: "LOG_FORMAT",
             default: Some("json"),
-            description: "`json` (one JSON object per line, for log collectors) or `pretty` (readable text \
-                          for local work).",
+            description: "`json` (one JSON object per line, for log collectors) or `text` (readable text, \
+                          one line per event, for local work).",
         },
     ];
 
-    /// Reads `<prefix>_LOG` and `<prefix>_LOG_FORMAT`; unset or empty values take the defaults.
+    /// Reads `<prefix>_LOG` (unset or empty: `RUST_LOG`, then [`DEFAULT_FILTER`]) and
+    /// `<prefix>_LOG_FORMAT` (unset or empty: `json`).
     pub fn from_lookup(
         prefix: &str,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, ConfigError> {
-        let l = Lookup::new(prefix, lookup);
-        let filter = l.get("LOG").unwrap_or_else(|| DEFAULT_FILTER.to_owned());
-        build_filter(&filter).map_err(|_| l.invalid("LOG", "not a valid EnvFilter directive"))?;
+        let l = Lookup::new(prefix, &lookup);
+        // `RUST_LOG` read through a lookup with prefix `RUST`, so its errors name `RUST_LOG`.
+        let rust = Lookup::new("RUST", &lookup);
+        let (source, filter) = match l.get("LOG") {
+            Some(f) => (&l, f),
+            None => (
+                &rust,
+                rust.get("LOG").unwrap_or_else(|| DEFAULT_FILTER.to_owned()),
+            ),
+        };
+        build_filter(&filter)
+            .map_err(|_| source.invalid("LOG", "not a valid EnvFilter directive"))?;
         let format = match l
             .get("LOG_FORMAT")
             .map(|v| v.to_ascii_lowercase())
             .as_deref()
         {
             None | Some("json") => LogFormat::Json,
-            Some("pretty") => LogFormat::Pretty,
-            Some(_) => return Err(l.invalid("LOG_FORMAT", "expected json or pretty")),
+            Some("text") => LogFormat::Text,
+            Some(_) => return Err(l.invalid("LOG_FORMAT", "expected json or text")),
         };
         Ok(Self { format, filter })
     }
@@ -103,7 +116,7 @@ pub fn init(format: LogFormat, filter: &str) -> Result<bool, InvalidFilter> {
     let builder = tracing_subscriber::fmt().with_env_filter(build_filter(filter)?);
     let result = match format {
         LogFormat::Json => builder.json().flatten_event(true).try_init(),
-        LogFormat::Pretty => builder.pretty().try_init(),
+        LogFormat::Text => builder.try_init(),
     };
     Ok(result.is_ok())
 }
@@ -134,17 +147,55 @@ mod tests {
         );
         let c = TelemetryConfig::from_lookup(
             "APP",
-            env(&[
-                ("APP_LOG", " debug,sqlx=warn "),
-                ("APP_LOG_FORMAT", "Pretty"),
-            ]),
+            env(&[("APP_LOG", " debug,sqlx=warn "), ("APP_LOG_FORMAT", "Text")]),
         )
         .unwrap();
         assert_eq!(c.filter, "debug,sqlx=warn");
-        assert_eq!(c.format, LogFormat::Pretty);
+        assert_eq!(c.format, LogFormat::Text);
         let empty =
             TelemetryConfig::from_lookup("APP", env(&[("APP_LOG", "  "), ("APP_LOG_FORMAT", "")]));
         assert_eq!(empty.unwrap(), TelemetryConfig::default(), "empty = unset");
+        let old = env(&[
+            ("RUST_LOG", "warn,sqlx=error"),
+            ("APP_LOG_FORMAT", "pretty"),
+        ]);
+        assert!(
+            TelemetryConfig::from_lookup("APP", old).is_err(),
+            "only json and text"
+        );
+    }
+
+    #[test]
+    fn rust_log_is_the_fallback() {
+        let rust_only =
+            TelemetryConfig::from_lookup("APP", env(&[("RUST_LOG", " warn,sqlx=error ")]));
+        assert_eq!(rust_only.unwrap().filter, "warn,sqlx=error");
+        let both = env(&[("APP_LOG", "debug"), ("RUST_LOG", "warn")]);
+        assert_eq!(
+            TelemetryConfig::from_lookup("APP", both).unwrap().filter,
+            "debug",
+            "own wins"
+        );
+        let empty_own = env(&[("APP_LOG", " "), ("RUST_LOG", "warn")]);
+        assert_eq!(
+            TelemetryConfig::from_lookup("APP", empty_own)
+                .unwrap()
+                .filter,
+            "warn"
+        );
+        let empty_rust = env(&[("RUST_LOG", "")]);
+        assert_eq!(
+            TelemetryConfig::from_lookup("APP", empty_rust)
+                .unwrap()
+                .filter,
+            "info"
+        );
+        let bad =
+            TelemetryConfig::from_lookup("APP", env(&[("RUST_LOG", "info,[=x")])).unwrap_err();
+        assert_eq!(
+            bad.name, "RUST_LOG",
+            "the error names the variable that was read"
+        );
     }
 
     #[test]
@@ -163,7 +214,7 @@ mod tests {
     fn init_is_idempotent() {
         let first = init(LogFormat::Json, "warn").unwrap();
         assert!(
-            !init(LogFormat::Pretty, "warn").unwrap(),
+            !init(LogFormat::Text, "warn").unwrap(),
             "second call keeps the first subscriber"
         );
         let _ = first;
