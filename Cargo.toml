@@ -1,0 +1,22 @@
+[workspace]
+resolver = "3"
+members = ["crates/z40-fundament"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.94"
+license = "MIT OR Apache-2.0"
+authors = ["zweiund40 GmbH"]
+repository = "https://github.com/zweiund40GmbH/fundament-sdk"
+
+[workspace.lints.rust]
+missing_docs = "deny"
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+unwrap_used = "deny"
+expect_used = "deny"
+
+[workspace.lints.rustdoc]
+broken_intra_doc_links = "deny"

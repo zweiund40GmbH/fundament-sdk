@@ -1,0 +1,46 @@
+# cargo-deny configuration: `just deny` (needs `cargo install --locked cargo-deny`).
+
+[graph]
+all-features = true
+
+[advisories]
+# RustSec advisory database: vulnerabilities are always errors; unmaintained crates only when they are
+# direct dependencies.
+unmaintained = "workspace"
+yanked = "deny"
+ignore = [
+    # rsa (Marvin attack, no fixed release): pulled in by sqlx-mysql only to RSA-encrypt the database
+    # password with the server's public key (caching_sha2_password without TLS). The attack needs
+    # private-key operations on our side, which never happen.
+    { id = "RUSTSEC-2023-0071", reason = "sqlx-mysql uses public-key encryption only; no private-key operations." },
+]
+
+[licenses]
+# Permissive licenses compatible with MIT OR Apache-2.0 distribution.
+allow = [
+    "0BSD",
+    "Apache-2.0",
+    "Apache-2.0 WITH LLVM-exception",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "BSL-1.0",
+    "CDLA-Permissive-2.0",
+    "ISC",
+    "MIT",
+    "MIT-0",
+    "Unicode-3.0",
+    "Unlicense",
+    "Zlib",
+]
+confidence-threshold = 0.9
+unused-allowed-license = "allow"
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+allow-wildcard-paths = true
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"
+allow-registry = ["https://github.com/rust-lang/crates.io-index"]

@@ -1,0 +1,30 @@
+[package]
+name = "z40-fundament"
+description = "Building blocks for apps that share data over a pull-based change feed: feed consumer, local replica, status endpoint and static service keys."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+authors.workspace = true
+repository.workspace = true
+readme = "README.md"
+keywords = ["change-feed", "replication", "sync", "status", "mariadb"]
+categories = ["database", "web-programming"]
+include = ["src/**/*.rs", "schema/*.sql", "README.md", "LICENSE-MIT", "LICENSE-APACHE"]
+
+[lints]
+workspace = true
+
+[features]
+default = []
+
+[dependencies]
+chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+thiserror = "2.0.12"
+
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
