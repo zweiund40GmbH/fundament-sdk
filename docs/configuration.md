@@ -19,6 +19,15 @@ Read with `FeedConsumerConfig::from_lookup(prefix, lookup)`.
 | `<PREFIX>_KEY` | (unset) | Feed key of this app at the source (sent as `Authorization: Bearer`). Unset: the feed is off. Secret: only for the process that runs the consumer. |
 | `<PREFIX>_INTERVAL_SECS` | `60` | Seconds between runs, 30–3600. Used by the app's scheduler (`slot_for`). |
 
+### Feed source (`feed-source`)
+
+Read with `FeedSourceConfig::from_lookup(prefix, lookup)`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `<PREFIX>_FEED_CLIENTS` | (unset) | Accepted feed keys as comma-separated `name=sha256hex` entries (only the SHA-256 of a key, never the key); the name identifies the consumer in the status document. Unset or empty: every feed request gets `401`. Keep it separate from status keys. |
+| `<PREFIX>_FEED_RETENTION_DAYS` | `30` | Days an event is kept after a newer version of the same record superseded it, 7–3650. The newest state of every record (also a tombstone) is always kept. |
+
 ### Status endpoint (`status`)
 
 Read with `StatusConfig::from_lookup(prefix, lookup)`.

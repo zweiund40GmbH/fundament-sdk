@@ -2,10 +2,11 @@
 //! cursor row is locked first, then each record row; a record is written only if its version is
 //! higher than the stored one.
 
-use super::{MySqlStore, db};
+use super::MySqlStore;
 use crate::consumer::StoreError;
 use crate::protocol::feed::should_apply;
 use crate::replica::{Record, ReplicaStore};
+use crate::sql::db;
 use chrono::{NaiveDateTime, Utc};
 use sqlx::{MySql, Transaction};
 

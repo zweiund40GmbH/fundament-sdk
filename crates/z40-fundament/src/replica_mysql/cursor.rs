@@ -1,9 +1,10 @@
 //! [`CursorStore`] for [`MySqlStore`]: cursor and health per source in the cursor table, and the events
 //! on a change of the result in the event table.
 
-use super::{EVENT_RETENTION_DAYS, MySqlStore, db};
+use super::{EVENT_RETENTION_DAYS, MySqlStore};
 use crate::consumer::{CursorState, CursorStore, FetchError, StoreError};
 use crate::health::{RunResult, SourceHealth, transition};
+use crate::sql::db;
 use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use sqlx::{MySql, Transaction};
 

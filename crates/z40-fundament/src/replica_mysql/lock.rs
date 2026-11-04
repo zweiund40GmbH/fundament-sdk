@@ -5,8 +5,9 @@
 //! a later `GET_LOCK` on the same session would nest instead of failing). This costs one reconnect per
 //! run. The name is qualified with the database, since locks are server-wide.
 
-use super::{MySqlStore, db};
+use super::MySqlStore;
 use crate::consumer::{RunLock, StoreError};
+use crate::sql::db;
 use sqlx::MySql;
 use sqlx::pool::PoolConnection;
 

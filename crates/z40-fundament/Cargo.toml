@@ -1,6 +1,6 @@
 [package]
 name = "z40-fundament"
-description = "Building blocks for apps that share data over a pull-based change feed: feed consumer, local replica, status endpoint and static service keys."
+description = "Building blocks for apps that share data over a pull-based change feed: feed source and consumer, local replica, status endpoint and static service keys."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -28,6 +28,10 @@ replica = ["feed-consumer"]
 replica-mysql = ["replica", "dep:sqlx"]
 # Serve `GET /fundament/v1/status` with axum.
 status = ["credentials", "dep:axum", "dep:tokio", "dep:tracing"]
+# Serve a change feed `GET /fundament/v1/events` with axum; the app provides the storage via a trait.
+feed-source = ["credentials", "dep:axum", "axum/query", "dep:tokio", "tokio/rt", "dep:tracing"]
+# Ready-made MariaDB/MySQL (sqlx) outbox, cursor assigner, retention and poll log for `feed-source`.
+feed-source-mysql = ["feed-source", "dep:sqlx"]
 
 [dependencies]
 chrono = { version = "0.4.42", default-features = false, features = ["clock", "std"] }

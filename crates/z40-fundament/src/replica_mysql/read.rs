@@ -1,9 +1,10 @@
 //! Reading what [`MySqlStore`] wrote: records of the replica and the newest events (for the status
 //! document). Stored JSON that cannot be parsed reads as `None` (the next newer version repairs it).
 
-use super::{MySqlStore, db};
+use super::MySqlStore;
 use crate::consumer::StoreError;
 use crate::protocol::Level;
+use crate::sql::db;
 use chrono::{DateTime, NaiveDateTime, Utc};
 use serde_json::Value;
 

@@ -37,7 +37,7 @@ test:
     #!/usr/bin/env bash
     set -euo pipefail
     if [ -z "${TEST_DATABASE_URL:-}" ]; then
-        echo "[skip] MariaDB integration tests (replica_mysql, run_once): TEST_DATABASE_URL not set"
+        echo "[skip] MariaDB integration tests (replica_mysql, run_once, feed_source_mysql, feed_round_trip): TEST_DATABASE_URL not set"
     fi
     cargo test --workspace --all-features --locked
 

@@ -2,9 +2,12 @@ use super::*;
 use crate::credentials::{MAX_FAILURES, key_entry};
 use crate::status::StatusBuilder;
 use axum::body::{Body, to_bytes};
+use axum::extract::ConnectInfo;
 use axum::http::Request as HttpRequest;
+use axum::http::{StatusCode, header};
 use chrono::Utc;
 use serde_json::Value;
+use std::net::SocketAddr;
 use tower::ServiceExt;
 
 /// A provider answering ok, failing, or hanging.

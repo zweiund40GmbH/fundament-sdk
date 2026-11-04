@@ -17,7 +17,10 @@ mod read;
 pub use lock::MySqlLockGuard;
 pub use read::{StoredEvent, StoredRecord};
 
+pub use crate::sql::InvalidTableName;
+
 use crate::replica::{InvalidKind, check_kind};
+use crate::sql::{check_names, check_prefix};
 use sqlx::{AssertSqlSafe, MySqlPool};
 
 /// Events are kept this many days.
@@ -27,11 +30,6 @@ pub const DEFAULT_EVENT_KIND: &str = "feed";
 /// The schema with the default table names (`fundament_replica`, `fundament_cursor`, `fundament_event`).
 pub const SCHEMA: &str = include_str!("../../schema/mysql.sql");
 
-/// A table name is not 1–64 characters of `a-z A-Z 0-9 _` (or a prefix longer than 16).
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("invalid table name or prefix (allowed: a-z, A-Z, 0-9, _)")]
-pub struct InvalidTableName;
-
 /// Names of the three tables.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tables {
@@ -40,18 +38,11 @@ pub struct Tables {
     event: String,
 }
 
-/// Whether `s` is a safe identifier of at most `max` characters (`a-z A-Z 0-9 _`).
-fn identifier(s: &str, max: usize) -> bool {
-    s.len() <= max && s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_')
-}
-
 impl Tables {
     /// The default names with `prefix` in front, e.g. `app_` → `app_fundament_replica`.
     /// The prefix has at most 16 characters of `a-z A-Z 0-9 _`.
     pub fn with_prefix(prefix: &str) -> Result<Self, InvalidTableName> {
-        if !identifier(prefix, 16) {
-            return Err(InvalidTableName);
-        }
+        check_prefix(prefix)?;
         Self::new(
             &format!("{prefix}fundament_replica"),
             &format!("{prefix}fundament_cursor"),
@@ -61,11 +52,7 @@ impl Tables {
 
     /// Freely chosen names (e.g. to avoid a clash with existing tables).
     pub fn new(replica: &str, cursor: &str, event: &str) -> Result<Self, InvalidTableName> {
-        for name in [replica, cursor, event] {
-            if name.is_empty() || !identifier(name, 64) {
-                return Err(InvalidTableName);
-            }
-        }
+        check_names(&[replica, cursor, event])?;
         Ok(Self {
             replica: replica.to_owned(),
             cursor: cursor.to_owned(),
@@ -131,11 +118,6 @@ impl MySqlStore {
     pub fn tables(&self) -> &Tables {
         &self.tables
     }
-}
-
-/// Wraps a database error.
-fn db(e: sqlx::Error) -> crate::consumer::StoreError {
-    crate::consumer::StoreError::new(e)
 }
 
 #[cfg(test)]

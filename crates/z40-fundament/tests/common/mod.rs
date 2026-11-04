@@ -12,11 +12,22 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use z40_fundament::replica_mysql::Tables;
 
 /// Runs `test` with a pool on a fresh database that has the schema for `tables`, and drops the
 /// database afterwards (also when the test panics). Without `TEST_DATABASE_URL` prints `[skip]`.
-pub async fn with_db<F, Fut>(name: &str, tables: Tables, test: F)
+#[cfg(feature = "replica-mysql")]
+pub async fn with_db<F, Fut>(name: &str, tables: z40_fundament::replica_mysql::Tables, test: F)
+where
+    F: FnOnce(MySqlPool) -> Fut + Send + 'static,
+    Fut: Future<Output = ()> + Send + 'static,
+{
+    with_schema(name, tables.schema(), test).await;
+}
+
+/// Runs `test` with a pool on a fresh database that has `schema` (statements separated by `;`), and
+/// drops the database afterwards (also when the test panics). Without `TEST_DATABASE_URL` prints
+/// `[skip]`.
+pub async fn with_schema<F, Fut>(name: &str, schema: String, test: F)
 where
     F: FnOnce(MySqlPool) -> Fut + Send + 'static,
     Fut: Future<Output = ()> + Send + 'static,
@@ -42,7 +53,7 @@ where
     // Setup and test run in a task, so a panic in either still drops the database below.
     let result = tokio::spawn(async move {
         let pool = MySqlPool::connect(&url).await.unwrap();
-        for stmt in schema_statements(&tables.schema()) {
+        for stmt in schema_statements(&schema) {
             pool.execute(sqlx::AssertSqlSafe(stmt)).await.unwrap();
         }
         test(pool.clone()).await;
@@ -92,6 +103,15 @@ async fn events(
         tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
     }
     (feed.answer)(q.get("since").and_then(|s| s.parse().ok()).unwrap_or(0))
+}
+
+/// Serves `router` on 127.0.0.1 with the peer address as `ConnectInfo`; returns the base URL.
+pub async fn serve(router: Router) -> String {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let service = router.into_make_service_with_connect_info::<std::net::SocketAddr>();
+    tokio::spawn(async move { axum::serve(listener, service).await.unwrap() });
+    format!("http://{addr}")
 }
 
 /// Serves `answer` at `/fundament/v1/events` on 127.0.0.1; returns the base URL.

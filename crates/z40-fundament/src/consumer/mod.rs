@@ -23,24 +23,14 @@ pub use run::{
     BuildError, DEFAULT_MAX_PAGES, FeedConsumer, FeedConsumerBuilder, RunOutcome, RunReport,
 };
 pub use schedule::slot_for;
+// The storage error lives at the crate root (shared with the other features); re-exported here
+// so the path of 0.1.0 keeps working.
+pub use crate::StoreError;
 
 use crate::health::SourceHealth;
 use crate::protocol::feed::FeedEvent;
 use chrono::{DateTime, Utc};
 use std::future::Future;
-
-/// A failure of the app's storage. Wraps the original error; it is returned to the app, never sent
-/// over the wire.
-#[derive(Debug, thiserror::Error)]
-#[error(transparent)]
-pub struct StoreError(Box<dyn std::error::Error + Send + Sync>);
-
-impl StoreError {
-    /// Wraps `error`.
-    pub fn new(error: impl std::error::Error + Send + Sync + 'static) -> Self {
-        Self(Box::new(error))
-    }
-}
 
 /// Stored position and health of one source.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

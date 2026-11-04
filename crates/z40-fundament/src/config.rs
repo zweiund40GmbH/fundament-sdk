@@ -110,6 +110,16 @@ pub fn reference_markdown() -> String {
         ));
         out.push('\n');
     }
+    #[cfg(feature = "feed-source")]
+    {
+        out.push_str("### Feed source (`feed-source`)\n\n");
+        out.push_str("Read with `FeedSourceConfig::from_lookup(prefix, lookup)`.\n\n");
+        out.push_str(&variable_table(
+            "<PREFIX>",
+            crate::feed_source::FeedSourceConfig::VARIABLES,
+        ));
+        out.push('\n');
+    }
     #[cfg(feature = "status")]
     {
         out.push_str("### Status endpoint (`status`)\n\n");
