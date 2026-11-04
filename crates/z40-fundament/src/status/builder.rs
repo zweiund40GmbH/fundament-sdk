@@ -26,11 +26,14 @@ pub struct StatusBuilder {
 }
 
 impl StatusBuilder {
-    /// A document of `app` in `version`, built at `now`.
+    /// A document of `app` in `version`, built at `now`. `app` must not be empty (readers reject such a
+    /// document, `docs/protocol.md` §3.3; checked in debug builds).
     pub fn new(app: impl Into<String>, version: impl Into<String>, now: DateTime<Utc>) -> Self {
+        let app = app.into();
+        debug_assert!(!app.trim().is_empty(), "status document without app name");
         Self {
             doc: StatusDocument {
-                app: app.into(),
+                app,
                 version: version.into(),
                 as_of: timestamp(now),
                 state: Level::Ok,
@@ -96,7 +99,9 @@ impl StatusBuilder {
         })
     }
 
-    /// Adds an event. Events are expected newest first; only the first [`MAX_EVENTS`] are kept.
+    /// Adds an event. Events are expected newest first; only the first [`MAX_EVENTS`] are kept. `kind`
+    /// must not be empty (readers reject such a document, `docs/protocol.md` §3.3; checked in debug
+    /// builds).
     pub fn event(
         mut self,
         time: DateTime<Utc>,
@@ -104,10 +109,12 @@ impl StatusBuilder {
         level: Level,
         text: impl Into<String>,
     ) -> Self {
+        let kind = kind.into();
+        debug_assert!(!kind.trim().is_empty(), "status event without kind");
         if self.doc.events.len() < MAX_EVENTS {
             self.doc.events.push(StatusEvent {
                 time: timestamp(time),
-                kind: kind.into(),
+                kind,
                 level,
                 text: text.into(),
             });

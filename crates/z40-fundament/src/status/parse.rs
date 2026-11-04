@@ -125,6 +125,11 @@ mod tests {
         assert!(doc.version.is_empty() && doc.as_of.is_empty());
         assert!(doc.notes.is_empty() && doc.offers.is_empty() && doc.pollers.is_empty());
         assert!(doc.sources.is_empty() && doc.events.is_empty());
+        let nulls = json!({ "app": "crm", "zustand": "ok", "version": null, "stand": null,
+            "hinweise": null, "angebote": null, "abrufer": null, "bezieht": null, "ereignisse": null });
+        let doc = parse(&nulls).unwrap();
+        assert!(doc.version.is_empty() && doc.as_of.is_empty() && doc.notes.is_empty());
+        assert!(doc.offers.is_empty() && doc.pollers.is_empty() && doc.events.is_empty());
         let mut v = example();
         v["angebote"][0]["x"] = json!(true);
         v["abrufer"][0] = json!({ "name": "crm", "art": "feed", "rueckstand": 0 });
@@ -158,6 +163,11 @@ mod tests {
                 "angebote.ereignisseProMinute",
             ),
             ("/abrufer/0/rueckstand", json!(-1), "JSON"),
+            ("/abrufer/0/rueckstand", json!(null), "JSON"),
+            ("/angebote/0/letzterCursor", json!(null), "JSON"),
+            ("/angebote/0/ereignisseProMinute", json!(null), "JSON"),
+            ("/angebote/0/ereignisse24h", json!(null), "JSON"),
+            ("/zustand", json!(null), "JSON"),
             (
                 "/abrufer/0/letzterAbruf",
                 json!("gestern"),

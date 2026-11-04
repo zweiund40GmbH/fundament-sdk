@@ -14,6 +14,9 @@ pub type PollResult = (String, Result<StatusDocument, StatusFetchError>);
 /// do not appear in the result), at most `concurrency` at a time (`0` counts as `1`). The results are
 /// in the order of `targets`; each fetch has its own [`super::FETCH_DEADLINE`], so a call takes about
 /// `ceil(polled / concurrency) × 2 s` at worst. Needs a Tokio runtime (the fetches run as tasks).
+///
+/// Each call builds a new HTTP client, so a poller calling it every cycle reloads the trusted roots
+/// (and opens new connections) each time; a reusable poller may follow.
 pub async fn poll_all(
     targets: &[StatusTarget],
     keys: &StatusKeys,

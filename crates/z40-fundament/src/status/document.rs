@@ -2,12 +2,22 @@
 //! English; the JSON names (some German) are part of the wire format and fixed by `serde` renames.
 //!
 //! Reading is lenient (`docs/protocol.md` §3.3): unknown fields are ignored, missing lists are empty,
-//! a missing `version` or `stand` is an empty string and missing `null`able fields are `None`. The
+//! a missing `version` or `stand` is an empty string and missing `null`able fields are `None`; `null`
+//! counts as missing for the lists, `version` and `stand`. The
 //! figures (`letzterCursor`, `ereignisseProMinute`, `ereignisse24h`, `rueckstand`) are required, so `0`
 //! always means 0. The `serde(default)`s only affect reading; a built document writes every field.
 
 use crate::protocol::Level;
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Reads `null` like a missing value: the default (lenient fields only; serializing is unaffected).
+fn null_as_default<'de, D, T>(d: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Default + Deserialize<'de>,
+{
+    Ok(Option::<T>::deserialize(d)?.unwrap_or_default())
+}
 
 /// The whole document.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -15,28 +25,28 @@ pub struct StatusDocument {
     /// Name of the app (`app`).
     pub app: String,
     /// Version of the app (`version`).
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_as_default")]
     pub version: String,
     /// Time the document was built (`stand`, RFC 3339 UTC).
-    #[serde(rename = "stand", default)]
+    #[serde(rename = "stand", default, deserialize_with = "null_as_default")]
     pub as_of: String,
     /// Overall level (`zustand`).
     #[serde(rename = "zustand")]
     pub state: Level,
     /// Notes (`hinweise`).
-    #[serde(rename = "hinweise", default)]
+    #[serde(rename = "hinweise", default, deserialize_with = "null_as_default")]
     pub notes: Vec<Note>,
     /// What the app offers (`angebote`).
-    #[serde(rename = "angebote", default)]
+    #[serde(rename = "angebote", default, deserialize_with = "null_as_default")]
     pub offers: Vec<Offer>,
     /// Who polls the app (`abrufer`).
-    #[serde(rename = "abrufer", default)]
+    #[serde(rename = "abrufer", default, deserialize_with = "null_as_default")]
     pub pollers: Vec<Poller>,
     /// Sources the app reads from (`bezieht`).
-    #[serde(rename = "bezieht", default)]
+    #[serde(rename = "bezieht", default, deserialize_with = "null_as_default")]
     pub sources: Vec<Source>,
     /// The newest events of the app, newest first (`ereignisse`).
-    #[serde(rename = "ereignisse", default)]
+    #[serde(rename = "ereignisse", default, deserialize_with = "null_as_default")]
     pub events: Vec<StatusEvent>,
 }
 

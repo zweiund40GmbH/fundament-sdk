@@ -82,9 +82,10 @@ impl StatusTarget {
     }
 
     /// A plain-http loopback target for tests of this crate.
-    #[cfg(all(test, feature = "status"))]
+    #[cfg(test)]
+    #[cfg(feature = "status")]
     pub(crate) fn loopback(app: &str, origin: &str) -> Self {
-        let origin = http_client::loopback_http_origin(origin).unwrap_or_default();
+        let origin = http_client::loopback_http_origin(origin).expect("loopback origin");
         Self {
             app: app.to_owned(),
             origin,

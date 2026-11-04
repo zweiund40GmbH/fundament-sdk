@@ -216,15 +216,15 @@ of the app is the worst level of its sources and of the notes that count.
 
 The fixed texts (`text` of `bezieht`, `hinweise` and `ereignisse`, and `message` of errors) are German and
 **part of version 1**. Monitoring shows them unchanged but does not interpret them; machines use the levels
-and codes. The texts of a consumed feed are:
+and codes. The texts of a consumed feed (in `bezieht`) and of a client reading a status (§3.3) are:
 
 | Text | Meaning |
 |---|---|
 | `noch kein Abruf` | The feed never ran. |
-| `nicht erreichbar` | Connection, TLS or timeout problem. |
+| `nicht erreichbar` | Connection, TLS or DNS problem. The feed consumer also reports a timeout this way; the status client reports a timeout as `Zeitüberschreitung`. |
 | `HTTP <status>`, e.g. `HTTP 503` | The source answered with a non-success status. |
 | `Antwort ungültig` | The page was invalid (§2.2) or too large. |
-| `Zeitüberschreitung` | Reading a status (§3.3): no complete answer within 2 seconds. |
+| `Zeitüberschreitung` | Status client only (§3.3): no complete answer within 2 seconds (also when connecting takes too long). |
 | `Abruf fehlgeschlagen` | The last run failed without a stored text. |
 | `kein erfolgreicher Abruf seit über <n> Minuten` | The last success is older than the threshold. |
 
@@ -251,12 +251,13 @@ A client (e.g. monitoring) reads the document leniently, so apps can add fields 
 
 - Unknown fields are ignored.
 - Missing lists (`hinweise`, `angebote`, `abrufer`, `bezieht`, `ereignisse`) count as empty; missing `version`
-  and `stand` as unknown (an empty string); missing `null`able fields (`letzterAbruf`, `cursor`,
-  `fehlversuche24h`, `text` of `bezieht`) as `null`.
+  and `stand` as unknown (an empty string); `null` counts as missing for these lists, `version` and `stand`.
+  Missing `null`able fields (`letzterAbruf`, `cursor`, `fehlversuche24h`, `text` of `bezieht`) read as `null`.
 - Required are `app` (not empty) and `zustand`, and in each entry `stufe`, `text`, `art`, `typ`, `name`,
   `quelle`, `zustand` and `zeit` where listed above, as well as the figures `letzterCursor`,
-  `ereignisseProMinute`, `ereignisse24h` and `rueckstand` (every producer sends them, so `0` always means 0). A required field that is
-  missing or invalid (an unknown level, a time that is not RFC 3339, a negative figure) makes the **whole** answer invalid (`Antwort ungültig`).
+  `ereignisseProMinute`, `ereignisse24h` and `rueckstand` (every producer sends them, so `0` always means 0;
+  `null` is invalid). A required field that is missing or invalid (an unknown level, a time that is not
+  RFC 3339, a negative figure) makes the **whole** answer invalid (`Antwort ungültig`).
 - The client sends each app only the status key of that app, follows no redirects, waits at most 2 seconds for
   the complete answer and reads at most 256 KiB. Its fixed texts are those of §3.1 (`nicht erreichbar`,
   `HTTP <status>`, `Antwort ungültig`, `Zeitüberschreitung`).
