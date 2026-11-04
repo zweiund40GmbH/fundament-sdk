@@ -11,11 +11,22 @@
 //! * [`health`] – health rule of a consumed source and the events on change
 //! * [`config`] – `from_lookup` configuration helpers and the generated reference
 //! * [`secret`] – a string type with redacted `Debug`
+//!
+//! Behind features:
+//!
+//! * `credentials` → [`credentials`] – static service keys, failure brake, outgoing bearer key
+//! * `status` → [`status`] – status document, builder and axum endpoint
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod config;
+#[cfg(feature = "credentials")]
+#[cfg_attr(docsrs, doc(cfg(feature = "credentials")))]
+pub mod credentials;
 pub mod health;
 pub mod protocol;
 pub mod secret;
+#[cfg(feature = "status")]
+#[cfg_attr(docsrs, doc(cfg(feature = "status")))]
+pub mod status;
 
 pub use secret::SecretString;

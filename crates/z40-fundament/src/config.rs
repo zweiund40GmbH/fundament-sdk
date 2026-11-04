@@ -100,6 +100,16 @@ pub fn variable_table(prefix: &str, vars: &[ConfigVar]) -> String {
 pub fn reference_markdown() -> String {
     #[allow(unused_mut)]
     let mut out = String::new();
+    #[cfg(feature = "status")]
+    {
+        out.push_str("### Status endpoint (`status`)\n\n");
+        out.push_str("Read with `StatusConfig::from_lookup(prefix, lookup)`.\n\n");
+        out.push_str(&variable_table(
+            "<PREFIX>",
+            crate::status::StatusConfig::VARIABLES,
+        ));
+        out.push('\n');
+    }
     out
 }
 
