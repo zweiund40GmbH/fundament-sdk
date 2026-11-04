@@ -35,7 +35,7 @@ jobs:
     name: fmt, clippy (each feature), docs, file sizes
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # Without a name, rustup installs the toolchain of rust-toolchain.toml.
       - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
@@ -67,7 +67,7 @@ jobs:
           --health-timeout 5s
           --health-retries 30
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       # Server URL without database name: every test creates and drops its own database.
       - name: Set test database URL
         run: echo "TEST_DATABASE_URL=mysql://root:ci-root-password@127.0.0.1:${{ job.services.mariadb.ports['3306'] }}" >> "$GITHUB_ENV"
@@ -95,7 +95,7 @@ jobs:
     name: MSRV (1.94)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.94
       - uses: Swatinem/rust-cache@v2
         with:
@@ -108,7 +108,7 @@ jobs:
     name: cargo-deny (advisories, licenses, sources)
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           command: check advisories bans licenses sources
