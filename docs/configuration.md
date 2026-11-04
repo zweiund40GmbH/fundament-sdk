@@ -36,4 +36,12 @@ Read with `StatusConfig::from_lookup(prefix, lookup)`.
 |---|---|---|
 | `<PREFIX>_STATUS_CLIENTS` | (unset) | Accepted status keys as comma-separated `name=sha256hex` entries (only the SHA-256 of a key, never the key). Unset or empty: every status request gets `401`. Keep it separate from feed keys. |
 
+### Status client (`status-client`)
+
+Read with `StatusKeys::from_lookup(prefix, lookup)`.
+
+| Variable | Default | Description |
+|---|---|---|
+| `<PREFIX>_STATUS_KEYS` | (unset) | Status keys of the apps this app polls, as comma-separated `app=key` entries (one key per app; a key is only sent to its own app). Unset or empty: no app is polled. Secret. |
+
 <!-- END GENERATED -->

@@ -25,10 +25,11 @@ Ready-made MariaDB/MySQL implementations live behind their own feature.
 | `replica` | Local replica of feed records: `Mapping` (which fields you keep), `ReplicaStore`, the `Replica` adapter (version rule, tombstones) |
 | `replica-mysql` | `MySqlStore`: sqlx/MariaDB implementation of all consumer and replica traits (`GET_LOCK`, page and cursor in one transaction), schema in [`schema/mysql.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql.sql) |
 | `status` | Status document types and builder, and an axum router for `GET /fundament/v1/status` with key check and failure brake |
+| `status-client` | Reading the status of other apps: `StatusClient` (`GET /fundament/v1/status`, 2 s deadline, no redirects, 256 KiB limit, lenient parsing, fixed error texts), `StatusKeys` (one status key per target app) and `poll_all` (bounded parallel polling) |
 | `feed-source` | Serving a feed: `FeedEndpoint` (axum router for `GET /fundament/v1/events`: key check, failure brake, query rules, `hasMore`), the `FeedSourceStore` and `SourceStatusStore` traits, `assign_cursors_once` for the worker; with `status` also `source_status` (`angebote`, `abrufer`, failed attempts) |
 | `feed-source-mysql` | `MySqlSource`: sqlx/MariaDB outbox written in the app's transaction, cursor assigner after commit (`GET_LOCK`), retention that keeps the newest state per record, poll log; schema in [`schema/mysql-source.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql-source.sql) |
 
-Planned: caching, GraphQL helpers, a status client and token credentials.
+Planned: caching, GraphQL helpers and token credentials.
 
 ## Quick start: consume a feed into MariaDB
 
@@ -134,6 +135,42 @@ axum::serve(listener, app.into_make_service_with_connect_info::<std::net::Socket
 Behind a reverse proxy pass `StatusEndpoint::client_ip(|parts| …)` a function that reads `X-Forwarded-For`
 **only** when the direct peer is one of your proxies; otherwise every client could pick its own address and
 dodge the brake. Without any address all clients share one brake (a warning is logged once).
+
+## Quick start: read the status of other apps
+
+```toml
+[dependencies]
+z40-fundament = { version = "0.3", features = ["status-client"] }
+```
+
+```rust,ignore
+use z40_fundament::status::{StatusClient, StatusKeys, StatusTarget, poll_all};
+
+// MON_STATUS_KEYS=crm=<key at crm>,billing=<key at billing> (docs/configuration.md)
+let keys = StatusKeys::from_lookup("MON", |k| std::env::var(k).ok())?;
+
+// One app:
+if let Some(key) = keys.get("crm") {
+    match StatusClient::new("https://crm.example.com", key.clone())?.fetch().await {
+        Ok(doc) => println!("{}: {:?}", doc.app, doc.state),
+        Err(e) => println!("crm: {}", e.text()), // nicht erreichbar, Zeitüberschreitung, HTTP 401, Antwort ungültig
+    }
+}
+
+// Many apps, at most 4 at a time; targets without a key are skipped:
+let targets = [
+    StatusTarget::new("crm", "https://crm.example.com")?,
+    StatusTarget::new("billing", "https://billing.example.com")?,
+];
+for (app, result) in poll_all(&targets, &keys, 4).await? {
+    // store or show `result`
+}
+```
+
+A key is only ever sent to its own app. Parsing is lenient (unknown fields ignored, missing lists empty,
+`docs/protocol.md` §3.3); an invalid required field makes the whole answer `Antwort ungültig`. The texts of a
+document come from another app: show them as data, encoded for your output. TLS trusts the same roots as the
+feed consumer (built-in plus platform store / `SSL_CERT_FILE`).
 
 ## Documentation
 

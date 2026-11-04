@@ -43,6 +43,9 @@ pub enum ConfigErrorKind {
     /// A key cannot be sent in a header.
     #[cfg(feature = "credentials")]
     InvalidKey(crate::credentials::InvalidKey),
+    /// A status key map (`app=key,…`) is invalid.
+    #[cfg(feature = "status-client")]
+    StatusKeys(crate::status::StatusKeysError),
 }
 
 impl std::fmt::Display for ConfigError {
@@ -53,13 +56,15 @@ impl std::fmt::Display for ConfigError {
 }
 
 impl std::error::Error for ConfigError {
-    /// The key list or key error behind it, if any.
+    /// The key list, key or key map error behind it, if any.
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match &self.kind {
             #[cfg(feature = "credentials")]
             ConfigErrorKind::KeyList(e) => Some(e),
             #[cfg(feature = "credentials")]
             ConfigErrorKind::InvalidKey(e) => Some(e),
+            #[cfg(feature = "status-client")]
+            ConfigErrorKind::StatusKeys(e) => Some(e),
             _ => None,
         }
     }
@@ -188,6 +193,16 @@ pub fn reference_markdown() -> String {
         out.push_str(&variable_table(
             "<PREFIX>",
             crate::status::StatusConfig::VARIABLES,
+        ));
+        out.push('\n');
+    }
+    #[cfg(feature = "status-client")]
+    {
+        out.push_str("### Status client (`status-client`)\n\n");
+        out.push_str("Read with `StatusKeys::from_lookup(prefix, lookup)`.\n\n");
+        out.push_str(&variable_table(
+            "<PREFIX>",
+            crate::status::StatusKeys::VARIABLES,
         ));
         out.push('\n');
     }

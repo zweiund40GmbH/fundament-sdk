@@ -1,5 +1,10 @@
 //! The status document with the wire names of version 1 (`docs/protocol.md` §3). The Rust names are
 //! English; the JSON names (some German) are part of the wire format and fixed by `serde` renames.
+//!
+//! Reading is lenient (`docs/protocol.md` §3.3): unknown fields are ignored, missing lists are empty,
+//! missing counters are `0`, a missing `version` or `stand` is an empty string and missing `null`able
+//! fields are `None`. The `serde(default)`s only affect reading; a built document always writes every
+//! field.
 
 use crate::protocol::Level;
 use serde::{Deserialize, Serialize};
@@ -10,9 +15,10 @@ pub struct StatusDocument {
     /// Name of the app (`app`).
     pub app: String,
     /// Version of the app (`version`).
+    #[serde(default)]
     pub version: String,
     /// Time the document was built (`stand`, RFC 3339 UTC).
-    #[serde(rename = "stand")]
+    #[serde(rename = "stand", default)]
     pub as_of: String,
     /// Overall level (`zustand`).
     #[serde(rename = "zustand")]
@@ -54,13 +60,13 @@ pub struct Offer {
     #[serde(rename = "typ")]
     pub record_type: String,
     /// Newest cursor of the type (`letzterCursor`).
-    #[serde(rename = "letzterCursor")]
+    #[serde(rename = "letzterCursor", default)]
     pub last_cursor: u64,
     /// Events per minute, one decimal (`ereignisseProMinute`).
-    #[serde(rename = "ereignisseProMinute")]
+    #[serde(rename = "ereignisseProMinute", default)]
     pub events_per_minute: f64,
     /// Events in the last 24 hours (`ereignisse24h`).
-    #[serde(rename = "ereignisse24h")]
+    #[serde(rename = "ereignisse24h", default)]
     pub events_24h: u64,
 }
 
@@ -78,7 +84,7 @@ pub struct Poller {
     /// Cursor of that poll (`cursor`).
     pub cursor: Option<u64>,
     /// Events after `cursor`, capped at [`super::BACKLOG_CAP`] (`rueckstand`).
-    #[serde(rename = "rueckstand")]
+    #[serde(rename = "rueckstand", default)]
     pub backlog: u64,
     /// Failed attempts of this client in 24 hours; `None` when they cannot be attributed
     /// (`fehlversuche24h`).

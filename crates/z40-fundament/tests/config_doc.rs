@@ -2,7 +2,12 @@
 //! Run `just config-doc` (sets `UPDATE_CONFIG_DOC=1`) to rewrite it.
 
 // The reference covers every feature; compare only when all of them are enabled.
-#![cfg(all(feature = "feed-consumer", feature = "feed-source", feature = "status"))]
+#![cfg(all(
+    feature = "feed-consumer",
+    feature = "feed-source",
+    feature = "status",
+    feature = "status-client"
+))]
 
 const BEGIN: &str = "<!-- BEGIN GENERATED: just config-doc -->\n";
 const END: &str = "<!-- END GENERATED -->";

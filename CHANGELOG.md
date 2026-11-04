@@ -6,11 +6,25 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- `status-client` (new feature): `StatusClient` reads `GET /fundament/v1/status` of another app (`https` only,
+  `plain_http_for_tests` for loopback; bearer key, `Accept: application/json`, 2 s for the whole request, no
+  redirects, at most 256 KiB). `StatusFetchError` (`Unreachable`, `Timeout`, `Status(n)`, `Invalid`) with the
+  fixed texts `nicht erreichbar`, `Zeitüberschreitung`, `HTTP <n>`, `Antwort ungültig`; transport causes are
+  logged, never the key or the body. `StatusDocument::from_json` parses leniently (protocol §3.3).
+  `StatusKeys::from_lookup` reads `<PREFIX>_STATUS_KEYS` (`app=key,…`, one key per app, redacted `Debug`);
+  `StatusTarget` and `poll_all` poll many apps with bounded concurrency. `ConfigErrorKind::StatusKeys`.
+- `docs/protocol.md` §3.3: how a client reads the status document (additive).
+
 ### Changed
 
-- `feed-consumer`: the HTTP setup (origin check, client builder, bounded body reader, cause chain) moved to a
-  private module so the planned status client can share it; an announced `Content-Length` above the page limit
-  is refused before reading (same result, `Antwort ungültig`).
+- `status`: reading a `StatusDocument` accepts a missing `version`, `stand`, `letzterCursor`,
+  `ereignisseProMinute`, `ereignisse24h` and `rueckstand` (defaults); the written document is unchanged. The
+  `document` module is also available with `status-client` alone.
+- `feed-consumer`: the HTTP setup (origin check, client builder, bounded body reader, cause chain) is shared
+  with the status client; an announced `Content-Length` above the page limit is refused before reading (same
+  result, `Antwort ungültig`).
 
 ## [0.2.1] - 2026-11-04
 

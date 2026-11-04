@@ -20,6 +20,8 @@
 //! * `replica` → [`replica`] – local replica: mapping, version rule, tombstones
 //! * `replica-mysql` → [`replica_mysql`] – sqlx/MariaDB implementations of the storage traits
 //! * `status` → [`status`] – status document, builder and axum endpoint
+//! * `status-client` → [`status`] – status document and [`status::StatusClient`] to read the status of
+//!   other apps, with per-app keys ([`status::StatusKeys`]) and [`status::poll_all`]
 //! * `feed-source` → [`feed_source`] – serving a feed: query rules, page building, axum endpoint and the
 //!   [`feed_source::FeedSourceStore`] trait
 //! * `feed-source-mysql` → [`feed_source_mysql`] – sqlx/MariaDB outbox, cursor assigner, retention and
@@ -43,7 +45,7 @@ pub mod fields;
 pub mod health;
 #[cfg(any(feature = "status", feature = "feed-source"))]
 mod http;
-#[cfg(feature = "feed-consumer")]
+#[cfg(any(feature = "feed-consumer", feature = "status-client"))]
 mod http_client;
 pub mod protocol;
 #[cfg(feature = "replica")]
@@ -55,8 +57,8 @@ pub mod replica_mysql;
 pub mod secret;
 #[cfg(any(feature = "replica-mysql", feature = "feed-source-mysql"))]
 mod sql;
-#[cfg(feature = "status")]
-#[cfg_attr(docsrs, doc(cfg(feature = "status")))]
+#[cfg(any(feature = "status", feature = "status-client"))]
+#[cfg_attr(docsrs, doc(cfg(any(feature = "status", feature = "status-client"))))]
 pub mod status;
 
 mod store;

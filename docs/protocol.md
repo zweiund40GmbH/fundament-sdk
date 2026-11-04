@@ -243,3 +243,19 @@ All error bodies have the form `{"code": "<CODE>", "message": "<text>"}` and `Ca
 The **source** brakes failed attempts the same way on its change feed (§2): more than 10 per address (IPv6:
 one /64) and minute → `429` with `Retry-After: 60`. The client address is the direct peer, or the address a
 trusted reverse proxy forwards – `X-Forwarded-For` from anyone else is ignored.
+
+### 3.3 Reading the status
+
+A client (e.g. monitoring) reads the document leniently, so apps can add fields and send less:
+
+- Unknown fields are ignored.
+- Missing lists (`hinweise`, `angebote`, `abrufer`, `bezieht`, `ereignisse`) count as empty; missing figures
+  (`letzterCursor`, `ereignisseProMinute`, `ereignisse24h`, `rueckstand`) as `0`; missing `version` and `stand` as
+  unknown; missing `null`able fields as `null`.
+- Required are `app` (not empty) and `zustand`, and in each entry `stufe`, `text`, `art`, `typ`, `name`,
+  `quelle`, `zustand` and `zeit` where listed above. A required field that is missing or invalid (an unknown level,
+  a time that is not RFC 3339, a negative figure) makes the **whole** answer invalid (`Antwort ungültig`).
+- The client sends each app only the status key of that app, follows no redirects, waits at most 2 seconds for
+  the complete answer and reads at most 256 KiB. Its fixed texts are those of §3.1 (`nicht erreichbar`,
+  `HTTP <status>`, `Antwort ungültig`) plus `Zeitüberschreitung` when no complete answer came within 2 seconds.
+- Texts are data from another app: shown encoded, never interpreted.

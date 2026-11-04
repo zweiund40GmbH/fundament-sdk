@@ -1,29 +1,57 @@
 //! The status document of an app (`GET /fundament/v1/status`, `docs/protocol.md` §3): types with the
-//! exact wire names, a builder that derives the overall level, and an axum router that checks the
-//! status key, brakes guessers and answers within the deadline.
+//! exact wire names, and both sides of the endpoint.
 //!
-//! * [`document`] – the wire types
-//! * [`builder`] – [`StatusBuilder`]
-//! * [`handler`] – [`StatusEndpoint`] and the [`StatusProvider`] trait the app implements
+//! * [`document`] – the wire types (with `status` or `status-client`)
+//! * `status`: [`builder`] – [`StatusBuilder`] derives the overall level; [`handler`] –
+//!   [`StatusEndpoint`] (axum) checks the status key, brakes guessers and answers within the deadline,
+//!   with the [`StatusProvider`] trait the app implements
+//! * `status-client`: [`StatusClient`] reads the document of another app, [`StatusKeys`] holds one
+//!   status key per target app, [`poll_all`] polls many apps with bounded concurrency
 
+#[cfg(feature = "status")]
 pub mod builder;
+#[cfg(feature = "status-client")]
+mod client;
 pub mod document;
+#[cfg(feature = "status")]
 pub mod handler;
+#[cfg(feature = "status-client")]
+mod keys;
+#[cfg(feature = "status-client")]
+mod parse;
+#[cfg(feature = "status-client")]
+mod poll;
 
+#[cfg(feature = "status")]
 pub use builder::{BACKLOG_CAP, MAX_EVENTS, StatusBuilder, events_per_minute};
+#[cfg(feature = "status-client")]
+pub use client::{
+    FETCH_BODY_MAX, FETCH_DEADLINE, StatusClient, StatusClientError, StatusFetchError, StatusTarget,
+};
 pub use document::{Note, Offer, Poller, Source, StatusDocument, StatusEvent};
+#[cfg(feature = "status")]
 pub use handler::{ClientIp, FailedAttemptHook, StatusEndpoint, StatusProvider};
+#[cfg(feature = "status-client")]
+pub use keys::{StatusKeys, StatusKeysError};
+#[cfg(feature = "status-client")]
+pub use parse::InvalidDocument;
+#[cfg(feature = "status-client")]
+pub use poll::{PollResult, poll_all};
 
+#[cfg(feature = "status")]
 use crate::config::{ConfigError, ConfigVar};
+#[cfg(feature = "status")]
 use crate::credentials::KeyList;
 
 /// Settings of the status endpoint.
+#[cfg(feature = "status")]
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct StatusConfig {
     /// Accepted status keys (`<PREFIX>_STATUS_CLIENTS`); empty = every request gets `401`.
     pub clients: KeyList,
 }
 
+#[cfg(feature = "status")]
 impl StatusConfig {
     /// The variables read by [`StatusConfig::from_lookup`] (documented in `docs/configuration.md`).
     pub const VARIABLES: &'static [ConfigVar] = &[ConfigVar {
@@ -45,7 +73,7 @@ impl StatusConfig {
     }
 }
 
-#[cfg(test)]
+#[cfg(all(test, feature = "status"))]
 mod tests {
     use super::*;
     use crate::credentials::key_entry;
