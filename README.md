@@ -34,7 +34,7 @@ Planned: caching, GraphQL helpers, a status client and token credentials.
 
 ```toml
 [dependencies]
-z40-fundament = { version = "0.1", features = ["replica-mysql"] }
+z40-fundament = { version = "0.2", features = ["replica-mysql"] }
 ```
 
 1. Copy [`schema/mysql.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql.sql) into a migration of your app (add your

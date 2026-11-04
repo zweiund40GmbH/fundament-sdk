@@ -2,7 +2,7 @@
 //! validation of the source origin. Configuration only accepts `https://` origins; plain http exists
 //! only behind [`super::FeedConsumerBuilder::plain_http_for_tests`], which config cannot reach.
 
-use crate::config::{ConfigError, ConfigVar, Lookup};
+use crate::config::{ConfigError, ConfigErrorKind, ConfigVar, Lookup};
 use crate::credentials::BearerKey;
 use std::ops::RangeInclusive;
 use std::time::Duration;
@@ -109,14 +109,22 @@ impl FeedConsumerConfig {
         let url = l
             .get("URL")
             .map(|raw| {
-                https_origin(&raw)
-                    .ok_or_else(|| l.invalid("URL", "expected an https origin like https://host"))
+                https_origin(&raw).ok_or_else(|| {
+                    l.error(
+                        "URL",
+                        ConfigErrorKind::InvalidUrl,
+                        "expected an https origin like https://host",
+                    )
+                })
             })
             .transpose()?;
         let interval_secs = l.number("INTERVAL_SECS", DEFAULT_INTERVAL_SECS, INTERVAL_RANGE)?;
         let key = l
             .get("KEY")
-            .map(|k| BearerKey::new(k).map_err(|e| l.invalid("KEY", e.to_string())))
+            .map(|k| {
+                BearerKey::new(k)
+                    .map_err(|e| l.error("KEY", ConfigErrorKind::InvalidKey(e), e.to_string()))
+            })
             .transpose()?;
         Ok(Self {
             url,
@@ -190,6 +198,12 @@ mod tests {
         ] {
             let err = cfg(&[(k, v)]).unwrap_err();
             assert_eq!(err.name, k);
+            let kind = match k {
+                "CRM_FEED_URL" => ConfigErrorKind::InvalidUrl,
+                "CRM_FEED_KEY" => ConfigErrorKind::InvalidKey(crate::credentials::InvalidKey),
+                _ => ConfigErrorKind::OutOfRange { min: 30, max: 3600 },
+            };
+            assert_eq!(err.kind, kind);
             assert!(!err.to_string().contains(v), "value echoed: {err}");
         }
     }

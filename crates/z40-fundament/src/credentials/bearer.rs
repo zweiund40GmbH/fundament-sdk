@@ -2,7 +2,7 @@
 //! this app sends to another app.
 
 use crate::SecretString;
-use crate::config::{ConfigError, Lookup};
+use crate::config::{ConfigError, ConfigErrorKind, Lookup};
 use std::fmt;
 
 /// The key of an `Authorization` header value `Bearer <key>` (scheme case-insensitive, surrounding
@@ -47,7 +47,10 @@ impl BearerKey {
     ) -> Result<Option<Self>, ConfigError> {
         let l = Lookup::new(prefix, lookup);
         l.get(suffix)
-            .map(|k| Self::new(k).map_err(|e| l.invalid(suffix, e.to_string())))
+            .map(|k| {
+                Self::new(k)
+                    .map_err(|e| l.error(suffix, ConfigErrorKind::InvalidKey(e), e.to_string()))
+            })
             .transpose()
     }
 

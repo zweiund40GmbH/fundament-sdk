@@ -6,7 +6,14 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
-Planned as 0.2.0 (new features; the 0.1.0 API is unchanged).
+Planned as 0.2.0 (new features and one breaking change).
+
+### Changed (breaking)
+
+- `ConfigError` gains `kind: ConfigErrorKind` (`InvalidValue`, `OutOfRange { min, max }`, `InvalidUrl`,
+  `KeyList(KeyListError)`, `InvalidKey(InvalidKey)`) and `source()`; `ConfigError` and `ConfigErrorKind`
+  are `#[non_exhaustive]`. `name` and `reason` stay. Migration: build errors with `Lookup::invalid` or
+  `Lookup::error` instead of a struct literal, and match on `kind` with a `_` arm.
 
 ### Added
 

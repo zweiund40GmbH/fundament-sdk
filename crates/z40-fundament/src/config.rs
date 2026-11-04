@@ -9,14 +9,60 @@
 use std::ops::RangeInclusive;
 
 /// An invalid setting. The message names the variable but never echoes its value, because an
-/// operator may have pasted a secret into the wrong variable.
-#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-#[error("invalid setting {name}: {reason}")]
+/// operator may have pasted a secret into the wrong variable. [`ConfigError::kind`] tells apps what
+/// went wrong, e.g. to word their own message; `reason` is the English text.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConfigError {
     /// Full variable name, e.g. `CRM_FEED_INTERVAL_SECS`.
     pub name: String,
-    /// What is wrong, without the value.
+    /// What is wrong, without the value (English).
     pub reason: String,
+    /// What is wrong, as data.
+    pub kind: ConfigErrorKind,
+}
+
+/// The kind of a [`ConfigError`]. More kinds may come in minor versions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ConfigErrorKind {
+    /// The value is not valid for the variable (e.g. from [`Lookup::invalid`] of an app).
+    InvalidValue,
+    /// Not an integer in `min..=max`.
+    OutOfRange {
+        /// Smallest allowed value.
+        min: u64,
+        /// Largest allowed value.
+        max: u64,
+    },
+    /// Not an origin of the expected form (e.g. `https://host[:port]`).
+    InvalidUrl,
+    /// A key list (`name=sha256hex,…`) is invalid.
+    #[cfg(feature = "credentials")]
+    KeyList(crate::credentials::KeyListError),
+    /// A key cannot be sent in a header.
+    #[cfg(feature = "credentials")]
+    InvalidKey(crate::credentials::InvalidKey),
+}
+
+impl std::fmt::Display for ConfigError {
+    /// `invalid setting <NAME>: <reason>`.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "invalid setting {}: {}", self.name, self.reason)
+    }
+}
+
+impl std::error::Error for ConfigError {
+    /// The key list or key error behind it, if any.
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match &self.kind {
+            #[cfg(feature = "credentials")]
+            ConfigErrorKind::KeyList(e) => Some(e),
+            #[cfg(feature = "credentials")]
+            ConfigErrorKind::InvalidKey(e) => Some(e),
+            _ => None,
+        }
+    }
 }
 
 /// One documented variable of a feature.
@@ -55,11 +101,22 @@ impl<'a, F: Fn(&str) -> Option<String>> Lookup<'a, F> {
             .filter(|v| !v.is_empty())
     }
 
-    /// An error for `suffix`.
+    /// An error for `suffix` of kind [`ConfigErrorKind::InvalidValue`].
     pub fn invalid(&self, suffix: &str, reason: impl Into<String>) -> ConfigError {
+        self.error(suffix, ConfigErrorKind::InvalidValue, reason)
+    }
+
+    /// An error for `suffix` of `kind`.
+    pub fn error(
+        &self,
+        suffix: &str,
+        kind: ConfigErrorKind,
+        reason: impl Into<String>,
+    ) -> ConfigError {
         ConfigError {
             name: self.name(suffix),
             reason: reason.into(),
+            kind,
         }
     }
 
@@ -73,12 +130,16 @@ impl<'a, F: Fn(&str) -> Option<String>> Lookup<'a, F> {
         let Some(raw) = self.get(suffix) else {
             return Ok(default);
         };
-        let reason = || format!("expected an integer in {}..={}", range.start(), range.end());
-        let n: u64 = raw.parse().map_err(|_| self.invalid(suffix, reason()))?;
+        let (min, max) = (*range.start(), *range.end());
+        let err = || {
+            let reason = format!("expected an integer in {min}..={max}");
+            self.error(suffix, ConfigErrorKind::OutOfRange { min, max }, reason)
+        };
+        let n: u64 = raw.parse().map_err(|_| err())?;
         if range.contains(&n) {
             Ok(n)
         } else {
-            Err(self.invalid(suffix, reason()))
+            Err(err())
         }
     }
 }
@@ -158,7 +219,16 @@ mod tests {
         let err = l.number("BAD", 60, 30..=3600).unwrap_err();
         assert_eq!(err.name, "APP_BAD");
         assert!(!err.to_string().contains("s3cr3t"), "value never echoed");
-        assert!(l.number("N", 60, 50..=60).is_err());
+        assert_eq!(
+            l.number("N", 60, 50..=60).unwrap_err().kind,
+            ConfigErrorKind::OutOfRange { min: 50, max: 60 }
+        );
+        assert_eq!(err.kind, ConfigErrorKind::OutOfRange { min: 30, max: 3600 });
+        assert_eq!(l.invalid("X", "bad").kind, ConfigErrorKind::InvalidValue);
+        assert_eq!(
+            l.invalid("X", "bad").to_string(),
+            "invalid setting APP_X: bad"
+        );
     }
 
     #[test]

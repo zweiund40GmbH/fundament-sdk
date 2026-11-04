@@ -2,7 +2,7 @@
 //! with SHA-256 and compared with **every** entry in constant time, so neither the position of a match
 //! nor a partial match shows in the timing.
 
-use crate::config::{ConfigError, Lookup};
+use crate::config::{ConfigError, ConfigErrorKind, Lookup};
 use sha2::{Digest, Sha256};
 use std::fmt;
 use subtle::ConstantTimeEq;
@@ -115,7 +115,7 @@ impl KeyList {
     ) -> Result<Self, ConfigError> {
         let l = Lookup::new(prefix, lookup);
         Self::parse(&l.get(suffix).unwrap_or_default())
-            .map_err(|e| l.invalid(suffix, e.to_string()))
+            .map_err(|e| l.error(suffix, ConfigErrorKind::KeyList(e), e.to_string()))
     }
 
     /// Whether no client is configured.
@@ -207,6 +207,8 @@ mod tests {
         let env = |_: &str| Some(format!("x={key}"));
         let err = KeyList::from_lookup("APP", "STATUS_CLIENTS", env).unwrap_err();
         assert_eq!(err.name, "APP_STATUS_CLIENTS");
+        assert_eq!(err.kind, ConfigErrorKind::KeyList(KeyListError::Invalid(1)));
+        assert!(std::error::Error::source(&err).is_some());
         assert!(!err.to_string().contains(key));
     }
 }
