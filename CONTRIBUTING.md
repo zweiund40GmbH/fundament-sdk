@@ -43,6 +43,9 @@ docker run -d --name fundament-sdk-db --tmpfs /var/lib/mysql -e MARIADB_ROOT_PAS
 TEST_DATABASE_URL=mysql://root:test@127.0.0.1:33077 just test
 ```
 
+Without `TEST_DATABASE_URL`, `just test` prints `[skip]` and the database tests return early; CI fails if
+the variable is empty.
+
 The toolchain for development is pinned in `rust-toolchain.toml`; the minimum supported Rust version is
 `rust-version` in `Cargo.toml` and is checked in CI.
 
@@ -58,5 +61,11 @@ The toolchain for development is pinned in `rust-toolchain.toml`; the minimum su
 1. Move the *Unreleased* entries in `CHANGELOG.md` to a new version section and bump `version` in the
    workspace `Cargo.toml` (SemVer; before `1.0` a breaking change bumps the minor version).
 2. Merge to `main`, then tag the commit `vX.Y.Z` and push the tag.
-3. The `release` workflow runs the gate, publishes `z40-fundament` to crates.io and creates the GitHub
-   release from the changelog section.
+3. The `release` workflow checks that the tag is on `main` and matches the version, runs the gate,
+   publishes `z40-fundament` to crates.io and creates the GitHub release from the changelog section.
+
+Publishing uses crates.io **Trusted Publishing** (OIDC, no stored token): the repository, the workflow
+`release.yml` and the environment `release` are registered as trusted publisher of the crate on crates.io.
+The first version of a new crate cannot be published that way; for it (or if OIDC is unavailable) set the
+repository secret `CARGO_REGISTRY_TOKEN` (a token scoped to publishing `z40-fundament`), which then takes
+precedence. Remove the secret again afterwards.

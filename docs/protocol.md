@@ -74,11 +74,15 @@ wrong credential gives `401` without details.
 
 ### 2.2 Page rules
 
-- Events are in cursor order. `nextCursor` is the cursor to continue from.
+- `nextCursor` is the cursor to continue from.
 - `nextCursor` never goes back (`nextCursor ≥ since`), except with `gap`.
 - While `hasMore` is `true`, `nextCursor` is greater than `since` (the page made progress).
-- Every event that is not a tombstone carries `data`; every `key` is a UUID.
-- A page that breaks these rules is **invalid**; the consumer rejects it as a whole and keeps its cursor.
+- Events are in strictly ascending cursor order, each cursor is at most `nextCursor` and – except with
+  `gap` – greater than `since`.
+- Every event that is not a tombstone (`deleted: false`) carries `data`; every `key` is a UUID. A tombstone
+  without `data` is valid.
+- A page that breaks one of these rules is **invalid**: the consumer rejects the whole page, applies nothing
+  of it and keeps its cursor.
 
 ### 2.3 Gap and retention
 
@@ -106,9 +110,14 @@ wrong credential gives `401` without details.
   their version); they clear the data.
 - **Process idempotently.** Applying a page twice changes nothing.
 - **One run at a time** per source across all instances of the consumer (e.g. a database lock).
-- **On `gap`** read again from `0`; on any other failure keep the cursor and retry later (default interval
-  60 s).
-- Fetch pages until `hasMore` is `false`, with an upper bound of pages per run.
+- **On `gap`** set the cursor to `0` and read everything again (a full resync); stored states stay, the
+  versions decide.
+- **On any other failure** (network, HTTP status, invalid page) **keep the cursor**; the next run retries
+  (default interval 60 s). A full resync would not help – the same page would come again.
+- Fetch pages until `hasMore` is `false`, with a fixed upper bound of pages per run (the library: 20 by
+  default), so a backlog does not block the app; the next run continues.
+- Build the time slots of runs from **UTC**; slots from local time repeat or skip an hour when the clocks
+  change.
 - Keep only the fields you need. Never store personal data you do not need.
 
 ## 3. Status
@@ -156,17 +165,38 @@ polls).
 
 Texts are German, for humans, and never contain names, e-mail addresses or ids of persons.
 
-A consumed source counts as `fehler` when it never ran, when its last run failed, or when its last successful
-run is older than 15 minutes (the app may choose another threshold).
+A consumed feed (`bezieht[]` with `art: "feed"`) counts as `fehler` when it never ran, when its last run
+failed, or when its last successful run is older than 15 minutes (the threshold is configurable). `zustand`
+of the app is the worst level of its sources and of the notes that count.
 
-### 3.1 Errors
+### 3.1 Fixed texts
+
+The fixed texts (`text` of `bezieht`, `hinweise` and `ereignisse`, and `message` of errors) are German and
+**part of version 1**. Monitoring shows them unchanged but does not interpret them; machines use the levels
+and codes. The texts of a consumed feed are:
+
+| Text | Meaning |
+|---|---|
+| `noch kein Abruf` | The feed never ran. |
+| `nicht erreichbar` | Connection, TLS or timeout problem. |
+| `HTTP <status>`, e.g. `HTTP 503` | The source answered with a non-success status. |
+| `Antwort ungültig` | The page was invalid (§2.2) or too large. |
+| `Abruf fehlgeschlagen` | The last run failed without a stored text. |
+| `kein erfolgreicher Abruf seit über <n> Minuten` | The last success is older than the threshold. |
+
+A failing feed adds the note `Feed von <source>: <text>`. Events on a change of a feed are
+`Feed von <source>: <text>` (level `fehler`) and `Feed von <source> wieder erreichbar` (level `ok`).
+
+### 3.2 Errors
 
 All error bodies have the form `{"code": "<CODE>", "message": "<text>"}` and `Cache-Control: no-store`.
 
-| Status | Code | When |
-|---|---|---|
-| `401` | `UNAUTHENTICATED` | Missing or wrong credential. Header `WWW-Authenticate: Bearer`. No details. |
-| `429` | `RATE_LIMITED` | More than 10 failed attempts from one address (IPv6: one /64) within a minute. Header `Retry-After: 60`. |
-| `500` | `INTERNAL` | The status could not be built in time. |
+| Status | Code | Message | When |
+|---|---|---|---|
+| `401` | `UNAUTHENTICATED` | `Anmeldung erforderlich.` | Missing or wrong credential. Header `WWW-Authenticate: Bearer`. No details. |
+| `429` | `RATE_LIMITED` | `Zu viele Fehlversuche. Bitte warten Sie eine Minute.` | More than 10 failed attempts from one address (IPv6: one /64) within a minute. Header `Retry-After: 60`. |
+| `500` | `INTERNAL` | `Interner Fehler. Bitte versuchen Sie es später erneut.` | The status could not be built in time. |
 
-The same brake applies to the change feed of a source.
+The **source** brakes failed attempts the same way on its change feed (§2): more than 10 per address (IPv6:
+one /64) and minute → `429` with `Retry-After: 60`. The client address is the direct peer, or the address a
+trusted reverse proxy forwards – `X-Forwarded-For` from anyone else is ignored.
