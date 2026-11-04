@@ -34,7 +34,7 @@ fn page(items: Vec<Value>, next: u64, more: bool, gap: bool) -> (StatusCode, Str
     (StatusCode::OK, body.to_string())
 }
 
-/// The feed: two pages from 0, a gap for the stale cursor 99, and a failure for cursor 3.
+/// The feed: two pages from 0, a gap for the stale cursor 99, and a failure for cursor 4.
 fn answer(since: u64) -> (StatusCode, String) {
     match since {
         0 => page(
@@ -44,8 +44,8 @@ fn answer(since: u64) -> (StatusCode, String) {
             false,
         ),
         2 => page(
-            vec![event(3, 1, 2, true), event(3, 3, 1, false)],
-            3,
+            vec![event(3, 1, 2, true), event(4, 3, 1, false)],
+            4,
             false,
             false,
         ),
@@ -65,13 +65,15 @@ async fn full_run_into_mariadb() {
                 .types([T])
                 .build()
                 .unwrap();
-        let mapping = KeepFields::new().keep(T, "customer", &["name", "address.city"]);
+        let mapping = KeepFields::new()
+            .keep(T, "customer", &["name", "address.city"])
+            .unwrap();
         let store = Replica::new(MySqlStore::new(pool.clone(), tables.clone()), mapping);
 
         let r = consumer.run_once(&store).await.unwrap();
         assert_eq!(
             (r.outcome, r.pages, r.written, r.cursor),
-            (RunOutcome::Ok, 2, 4, 3)
+            (RunOutcome::Ok, 2, 4, 4)
         );
         let db = store.store();
         let live = db.records("crm", "customer").await.unwrap();
@@ -96,7 +98,7 @@ async fn full_run_into_mariadb() {
         let r = consumer.run_once(&store).await.unwrap();
         assert_eq!(r.outcome, RunOutcome::Failed(FetchError::Status(502)));
         let state = store.load("crm").await.unwrap().unwrap();
-        assert_eq!(state.cursor, 3);
+        assert_eq!(state.cursor, 4);
         assert_eq!(state.health.text.as_deref(), Some("HTTP 502"));
 
         // A stale cursor gets a gap: read again from 0, versions keep the newer states.
@@ -105,7 +107,7 @@ async fn full_run_into_mariadb() {
             .await
             .unwrap();
         let r = consumer.run_once(&store).await.unwrap();
-        assert_eq!((r.outcome, r.written, r.cursor), (RunOutcome::Ok, 0, 3));
+        assert_eq!((r.outcome, r.written, r.cursor), (RunOutcome::Ok, 0, 4));
         assert!(
             db.record("crm", "customer", &key(1))
                 .await
@@ -135,6 +137,62 @@ async fn full_run_into_mariadb() {
         assert_eq!(v["bezieht"][0]["quelle"], "crm");
         assert_eq!(v["ereignisse"][0]["text"], "Feed von crm wieder erreichbar");
         assert_eq!(v["ereignisse"][1]["text"], "Feed von crm: HTTP 502");
+    })
+    .await;
+}
+
+/// A run cancelled while it waits for the source must not leave the lock behind: the next run on the
+/// same pool runs (`Ok`), it is not `Locked`.
+#[tokio::test]
+async fn cancelled_run_releases_the_lock() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let tables = Tables::with_prefix("c_").unwrap();
+    with_db("cancel", tables.clone(), |pool| async move {
+        // The source does not answer within the first run's time.
+        let delay = Arc::new(AtomicU64::new(10_000));
+        let answer: common::Answer = Arc::new(|_| page(vec![], 0, false, false));
+        let base = common::feed_server_delayed(answer, Arc::clone(&delay)).await;
+        let consumer =
+            FeedConsumerBuilder::plain_http_for_tests("crm", &base, BearerKey::new("k").unwrap())
+                .unwrap()
+                .build()
+                .unwrap();
+        let store = Replica::new(MySqlStore::new(pool.clone(), tables), KeepFields::new());
+        let cancelled = tokio::time::timeout(
+            std::time::Duration::from_millis(100),
+            consumer.run_once(&store),
+        )
+        .await;
+        assert!(cancelled.is_err(), "the first run was cancelled");
+        delay.store(0, Ordering::SeqCst);
+        // The connection of the cancelled run closes in the background; give the server a moment.
+        // A pooled session that kept the lock would let the next run in (locks nest per session), so
+        // check that the lock is really free.
+        let lock_name = "LEFT(CONCAT('fundament_feed:', 'crm', ':', DATABASE()), 64)";
+        let mut free = false;
+        for _ in 0..50 {
+            let f: Option<i64> = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
+                "SELECT IS_FREE_LOCK({lock_name})"
+            )))
+            .fetch_one(&pool)
+            .await
+            .unwrap();
+            free = f == Some(1);
+            if free {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert!(free, "the lock of the cancelled run is released");
+        let mut outcome = RunOutcome::Locked;
+        for _ in 0..50 {
+            outcome = consumer.run_once(&store).await.unwrap().outcome;
+            if outcome != RunOutcome::Locked {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+        assert_eq!(outcome, RunOutcome::Ok);
     })
     .await;
 }

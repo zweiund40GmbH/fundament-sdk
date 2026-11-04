@@ -11,6 +11,7 @@ use sqlx::{Executor, MySqlPool};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicU64, Ordering};
 use z40_fundament::replica_mysql::Tables;
 
 /// Runs `test` with a pool on a fresh database that has the schema for `tables`, and drops the
@@ -75,18 +76,34 @@ fn schema_statements(schema: &str) -> Vec<String> {
 /// Answer of the fake feed for a `since`.
 pub type Answer = Arc<dyn Fn(u64) -> (StatusCode, String) + Send + Sync>;
 
+/// State of the fake feed: the answer and a delay before answering (milliseconds).
+#[derive(Clone)]
+struct Feed {
+    answer: Answer,
+    delay_ms: Arc<AtomicU64>,
+}
+
 async fn events(
-    State(answer): State<Answer>,
+    State(feed): State<Feed>,
     Query(q): Query<HashMap<String, String>>,
 ) -> (StatusCode, String) {
-    answer(q.get("since").and_then(|s| s.parse().ok()).unwrap_or(0))
+    let delay = feed.delay_ms.load(Ordering::SeqCst);
+    if delay > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(delay)).await;
+    }
+    (feed.answer)(q.get("since").and_then(|s| s.parse().ok()).unwrap_or(0))
 }
 
 /// Serves `answer` at `/fundament/v1/events` on 127.0.0.1; returns the base URL.
 pub async fn feed_server(answer: Answer) -> String {
+    feed_server_delayed(answer, Arc::new(AtomicU64::new(0))).await
+}
+
+/// Like [`feed_server`], waiting `delay_ms` (changeable while running) before each answer.
+pub async fn feed_server_delayed(answer: Answer, delay_ms: Arc<AtomicU64>) -> String {
     let app = Router::new()
         .route(z40_fundament::protocol::EVENTS_PATH, get(events))
-        .with_state(answer);
+        .with_state(Feed { answer, delay_ms });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
     tokio::spawn(async move { axum::serve(listener, app).await.unwrap() });

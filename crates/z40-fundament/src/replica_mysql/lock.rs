@@ -1,7 +1,9 @@
 //! The run lock: `GET_LOCK` on a pooled connection that is held for the whole run. The lock belongs to
-//! that connection, so it is released explicitly before the connection goes back to the pool (and by
-//! the server if the connection dies). The name is qualified with the database, since locks are
-//! server-wide.
+//! that connection's session. A connection that took the lock is **never returned to the pool**: it is
+//! closed when the guard is dropped (`close_on_drop`), so the server releases the lock even when the
+//! run is cancelled, panics or `RELEASE_LOCK` fails – otherwise a pooled session would keep the lock (and
+//! a later `GET_LOCK` on the same session would nest instead of failing). This costs one reconnect per
+//! run. The name is qualified with the database, since locks are server-wide.
 
 use super::{MySqlStore, db};
 use crate::consumer::{RunLock, StoreError};
@@ -15,7 +17,7 @@ const GET: &str = "SELECT GET_LOCK(LEFT(CONCAT('fundament_feed:', ?, ':', DATABA
 const RELEASE: &str =
     "SELECT RELEASE_LOCK(LEFT(CONCAT('fundament_feed:', ?, ':', DATABASE()), 64))";
 
-/// A held lock: the connection and the source.
+/// A held lock: the connection (closed on drop, never pooled again) and the source.
 #[derive(Debug)]
 pub struct MySqlLockGuard {
     conn: PoolConnection<MySql>,
@@ -32,18 +34,25 @@ impl RunLock for MySqlStore {
             .fetch_one(&mut *conn)
             .await
             .map_err(db)?;
-        Ok((got == Some(1)).then(|| MySqlLockGuard {
+        if got != Some(1) {
+            // Not taken: the session holds no lock, the connection may go back to the pool.
+            return Ok(None);
+        }
+        conn.close_on_drop();
+        Ok(Some(MySqlLockGuard {
             conn,
             source: source.to_owned(),
         }))
     }
 
+    /// Releases the lock explicitly; on error the guard is dropped anyway and closing its connection
+    /// ends the session, which releases the lock on the server.
     async fn unlock(&self, mut guard: MySqlLockGuard) -> Result<(), StoreError> {
-        sqlx::query(RELEASE)
+        let released = sqlx::query(RELEASE)
             .bind(&guard.source)
             .execute(&mut *guard.conn)
-            .await
-            .map_err(db)?;
-        Ok(())
+            .await;
+        drop(guard);
+        released.map(|_| ()).map_err(db)
     }
 }

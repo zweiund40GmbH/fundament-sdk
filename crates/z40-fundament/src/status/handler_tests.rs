@@ -111,3 +111,64 @@ async fn empty_key_list_refuses_everyone() {
     let (status, _) = call(&r, Some("Bearer good-key"), "203.0.113.5").await;
     assert_eq!(status, StatusCode::UNAUTHORIZED);
 }
+
+/// A request without `ConnectInfo` and with an optional `X-Forwarded-For`.
+async fn call_plain(r: &Router, auth: &str, forwarded: Option<&str>) -> StatusCode {
+    let mut req = HttpRequest::get(STATUS_PATH).header(header::AUTHORIZATION, auth);
+    if let Some(f) = forwarded {
+        req = req.header("x-forwarded-for", f);
+    }
+    r.clone()
+        .oneshot(req.body(Body::empty()).unwrap())
+        .await
+        .unwrap()
+        .status()
+}
+
+#[tokio::test]
+async fn without_connect_info_all_clients_share_one_brake() {
+    let r = router(Fake::Ok);
+    for _ in 0..MAX_FAILURES {
+        assert_eq!(
+            call_plain(&r, "Bearer wrong", None).await,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+    assert_eq!(
+        call_plain(&r, "Bearer good-key", None).await,
+        StatusCode::TOO_MANY_REQUESTS,
+        "unknown addresses are counted together"
+    );
+}
+
+#[tokio::test]
+async fn custom_resolver_captures_proxy_configuration() {
+    let trusted_header = true;
+    let keys = KeyList::parse(&key_entry("monitor", "good-key").unwrap()).unwrap();
+    let r: Router = StatusEndpoint::new(Fake::Ok, keys)
+        .client_ip(move |parts: &Parts| {
+            trusted_header
+                .then(|| {
+                    parts
+                        .headers
+                        .get("x-forwarded-for")?
+                        .to_str()
+                        .ok()?
+                        .parse()
+                        .ok()
+                })
+                .flatten()
+        })
+        .router();
+    for _ in 0..MAX_FAILURES {
+        call_plain(&r, "Bearer wrong", Some("198.51.100.7")).await;
+    }
+    assert_eq!(
+        call_plain(&r, "Bearer good-key", Some("198.51.100.7")).await,
+        StatusCode::TOO_MANY_REQUESTS
+    );
+    assert_eq!(
+        call_plain(&r, "Bearer good-key", Some("198.51.100.8")).await,
+        StatusCode::OK
+    );
+}

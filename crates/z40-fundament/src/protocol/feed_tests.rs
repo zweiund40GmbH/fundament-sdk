@@ -9,7 +9,7 @@ fn body(v: Value) -> Vec<u8> {
 }
 
 fn event(deleted: bool, data: Value) -> Value {
-    json!({ "cursor": 1, "type": T, "key": K, "version": 1, "deleted": deleted, "data": data })
+    json!({ "cursor": 5, "type": T, "key": K, "version": 1, "deleted": deleted, "data": data })
 }
 
 #[test]
@@ -132,4 +132,32 @@ fn page_round_trip() {
     assert_eq!(v["items"][0]["type"], T);
     assert!(v["items"][0].get("data").is_none());
     assert_eq!(parse_page(&serde_json::to_vec(&p).unwrap(), 0).unwrap(), p);
+}
+
+#[test]
+fn event_cursor_order() {
+    let ev = |c: u64| json!({ "cursor": c, "type": T, "key": K, "version": 1, "data": {} });
+    let page = |items: Vec<Value>, next: u64, gap: bool| {
+        body(json!({ "items": items, "nextCursor": next, "hasMore": false, "gap": gap }))
+    };
+    assert!(parse_page(&page(vec![ev(5), ev(6)], 6, false), 4).is_ok());
+    assert!(
+        parse_page(&page(vec![ev(5), ev(9)], 9, false), 4).is_ok(),
+        "gaps between cursors are fine"
+    );
+    for (items, next, since) in [
+        (vec![ev(6), ev(5)], 6, 4),
+        (vec![ev(5), ev(5)], 5, 4),
+        (vec![ev(5), ev(7)], 6, 4),
+        (vec![ev(4)], 4, 4),
+    ] {
+        assert_eq!(
+            parse_page(&page(items, next, false), since),
+            Err(PageError::Invalid)
+        );
+    }
+    assert!(
+        parse_page(&page(vec![ev(1)], 1, true), 9).is_ok(),
+        "with gap the page starts anywhere"
+    );
 }

@@ -2,7 +2,7 @@
 //! the feed (contact data, notes …) reaches the app's database. Plus [`text_field`] for hand-written
 //! mappings.
 
-use super::{Mapping, Projection};
+use super::{InvalidKind, Mapping, Projection, check_kind};
 use serde_json::{Map, Value};
 
 /// Longest kept text (characters); longer strings are cut.
@@ -35,14 +35,20 @@ impl KeepFields {
         Self::default()
     }
 
-    /// Keeps `fields` of events of `event_type`, stored under `kind`.
-    pub fn keep(mut self, event_type: &str, kind: &str, fields: &[&str]) -> Self {
+    /// Keeps `fields` of events of `event_type`, stored under `kind` (1 to 32 characters).
+    pub fn keep(
+        mut self,
+        event_type: &str,
+        kind: &str,
+        fields: &[&str],
+    ) -> Result<Self, InvalidKind> {
+        check_kind(kind)?;
         self.0.push(Kept {
             event_type: event_type.to_owned(),
             kind: kind.to_owned(),
             fields: fields.iter().map(|f| (*f).to_owned()).collect(),
         });
-        self
+        Ok(self)
     }
 }
 
@@ -88,8 +94,8 @@ impl Mapping for KeepFields {
             .map(|k| k.kind.as_str())
     }
 
-    fn project(&self, kind: &str, data: &Value) -> Projection {
-        let Some(kept) = self.0.iter().find(|k| k.kind == kind) else {
+    fn project(&self, event_type: &str, data: &Value) -> Projection {
+        let Some(kept) = self.0.iter().find(|k| k.event_type == event_type) else {
             return Projection::default();
         };
         let mut out = Map::new();

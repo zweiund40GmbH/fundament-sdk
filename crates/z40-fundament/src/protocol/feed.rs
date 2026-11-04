@@ -66,11 +66,23 @@ pub enum PageError {
 ///
 /// * `nextCursor` never goes back (except with `gap`),
 /// * `nextCursor` moves on while `hasMore` (else the consumer would fetch the same page forever),
+/// * the cursors of the events are strictly ascending, not greater than `nextCursor` and – except
+///   with `gap` – greater than `since` (a page that repeats or reorders events would make the stored
+///   cursor lie about what was applied),
 /// * every key is a UUID,
 /// * every event that is not a tombstone carries `data` (a missing state is not a silent delete).
 pub fn parse_page(body: &[u8], since: u64) -> Result<FeedPage, PageError> {
     let page: FeedPage = serde_json::from_slice(body).map_err(|_| PageError::Invalid)?;
     if !page.gap && (page.next_cursor < since || (page.has_more && page.next_cursor == since)) {
+        return Err(PageError::Invalid);
+    }
+    let floor = if page.gap { 0 } else { since };
+    let ascending = page
+        .items
+        .iter()
+        .try_fold(floor, |prev, e| (e.cursor > prev).then_some(e.cursor))
+        .is_some_and(|last| last <= page.next_cursor || page.items.is_empty());
+    if !ascending {
         return Err(PageError::Invalid);
     }
     let broken = |e: &FeedEvent| !is_uuid(&e.key) || (!e.deleted && e.data.is_none());

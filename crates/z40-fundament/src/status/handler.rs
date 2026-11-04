@@ -16,14 +16,16 @@ use serde_json::json;
 use std::future::Future;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 /// Error of a [`StatusProvider`] (logged, never sent to the client).
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
 
 /// Resolves the client address of a request for the brake. The default reads axum's
-/// `ConnectInfo<SocketAddr>`; behind a reverse proxy pass a function that honours only trusted proxies.
-pub type ClientIp = fn(&Parts) -> Option<IpAddr>;
+/// `ConnectInfo<SocketAddr>`; behind a reverse proxy pass a function (it may capture the app's proxy
+/// configuration) that takes `X-Forwarded-For` only from trusted proxy addresses.
+pub type ClientIp = Arc<dyn Fn(&Parts) -> Option<IpAddr> + Send + Sync>;
 
 /// Default deadline for building the document (the protocol allows 2 s for the whole answer).
 pub const DEFAULT_DEADLINE: Duration = Duration::from_millis(1500);
@@ -51,12 +53,20 @@ fn connect_info_ip(parts: &Parts) -> Option<IpAddr> {
 }
 
 /// The status endpoint: provider, accepted keys, brake, deadline and client address resolution.
+///
+/// **Client address.** The brake counts failed attempts per client address, so the endpoint must know
+/// it. Either serve the app with `into_make_service_with_connect_info::<SocketAddr>()` (the default
+/// reads `ConnectInfo`), or – behind a reverse proxy – pass [`StatusEndpoint::client_ip`] a function
+/// that trusts `X-Forwarded-For` **only** when the direct peer is one of the app's proxies (anyone else
+/// could send the header and dodge the brake). Requests without a known address are counted together
+/// under `0.0.0.0`; the first such request logs a warning, because then every client shares one brake.
 pub struct StatusEndpoint<P> {
     provider: P,
     keys: KeyList,
     brake: Arc<FailureBrake>,
     deadline: Duration,
     client_ip: ClientIp,
+    warned_unknown_ip: AtomicBool,
 }
 
 impl<P: StatusProvider> StatusEndpoint<P> {
@@ -67,7 +77,8 @@ impl<P: StatusProvider> StatusEndpoint<P> {
             keys,
             brake: Arc::new(FailureBrake::new()),
             deadline: DEFAULT_DEADLINE,
-            client_ip: connect_info_ip,
+            client_ip: Arc::new(connect_info_ip),
+            warned_unknown_ip: AtomicBool::new(false),
         }
     }
 
@@ -83,10 +94,28 @@ impl<P: StatusProvider> StatusEndpoint<P> {
         self
     }
 
-    /// How the client address is resolved (default: `ConnectInfo<SocketAddr>`).
-    pub fn client_ip(mut self, client_ip: ClientIp) -> Self {
-        self.client_ip = client_ip;
+    /// How the client address is resolved (default: `ConnectInfo<SocketAddr>`). See the type docs for
+    /// the reverse-proxy case.
+    pub fn client_ip(
+        mut self,
+        client_ip: impl Fn(&Parts) -> Option<IpAddr> + Send + Sync + 'static,
+    ) -> Self {
+        self.client_ip = Arc::new(client_ip);
         self
+    }
+
+    /// The client address of `parts`, or `0.0.0.0` (with a one-time warning) when it is unknown.
+    fn address(&self, parts: &Parts) -> IpAddr {
+        if let Some(ip) = (self.client_ip)(parts) {
+            return ip;
+        }
+        if !self.warned_unknown_ip.swap(true, Ordering::Relaxed) {
+            tracing::warn!(
+                "status endpoint cannot see client addresses: all clients share one failure brake; \
+                 serve with into_make_service_with_connect_info or pass StatusEndpoint::client_ip"
+            );
+        }
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED)
     }
 
     /// A router with the single route `GET /fundament/v1/status`, to merge into the app's router.
@@ -106,8 +135,7 @@ impl<P: StatusProvider> StatusEndpoint<P> {
 
     /// Answers one request (the router calls this; public for custom routing).
     pub async fn handle(&self, parts: &Parts) -> Response {
-        // Requests without a known address share one bucket.
-        let ip = (self.client_ip)(parts).unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+        let ip = self.address(parts);
         let now = Instant::now();
         if self.brake.is_blocked(ip, now) {
             let mut res = error(
@@ -128,7 +156,7 @@ impl<P: StatusProvider> StatusEndpoint<P> {
         let Some(caller) = caller else {
             self.brake.record_failure(ip, now);
             let net = shortened_for_logs(ip);
-            tracing::info!(%net, "status request with missing or wrong key");
+            tracing::debug!(%net, "status request with missing or wrong key");
             let mut res = error(
                 StatusCode::UNAUTHORIZED,
                 "UNAUTHENTICATED",

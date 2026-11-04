@@ -78,7 +78,9 @@ async fn version_rule_tombstones_and_cursor() {
 async fn run_results_events_and_reset() {
     let tables = Tables::new("rep", "cur", "evt").unwrap();
     with_db("cursor", tables.clone(), |pool| async move {
-        let s = MySqlStore::new(pool.clone(), tables).event_kind("bezug");
+        let s = MySqlStore::new(pool.clone(), tables)
+            .event_kind("bezug")
+            .unwrap();
         assert!(s.load("crm").await.unwrap().is_none());
         let t0 = Utc::now() - Duration::minutes(10);
         s.finish_run("crm", Some(FetchError::Status(503)), t0)

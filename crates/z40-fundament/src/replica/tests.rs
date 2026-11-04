@@ -20,12 +20,14 @@ fn event(deleted: bool, data: Option<Value>) -> FeedEvent {
 
 #[test]
 fn keep_fields_keeps_only_named_fields() {
-    let m = KeepFields::new().keep(T, "customer", &["name", "address.city", "address.zip", "n"]);
+    let m = KeepFields::new()
+        .keep(T, "customer", &["name", "address.city", "address.zip", "n"])
+        .unwrap();
     let data = json!({
         "name": "  Example Ltd ", "phone": "0123", "email": "a@example.com", "note": "private",
         "address": { "street": "Main St 1", "city": "Springfield", "zip": "" }, "n": 3
     });
-    let p = m.project("customer", &data);
+    let p = m.project(T, &data);
     assert_eq!(
         p.data,
         Some(json!({ "name": "Example Ltd", "address": { "city": "Springfield" }, "n": 3 }))
@@ -34,8 +36,8 @@ fn keep_fields_keeps_only_named_fields() {
     assert!(!text.contains("0123") && !text.contains("a@example.com") && !text.contains("private"));
     assert_eq!(m.kind(T), Some("customer"));
     assert_eq!(m.kind("urn:example:crm:contact"), None);
-    assert_eq!(m.project("customer", &json!({})).data, None);
-    let long = m.project("customer", &json!({ "name": "x".repeat(500) }));
+    assert_eq!(m.project(T, &json!({})).data, None);
+    let long = m.project(T, &json!({ "name": "x".repeat(500) }));
     assert_eq!(long.data.unwrap()["name"].as_str().unwrap().len(), TEXT_MAX);
 }
 
@@ -78,6 +80,7 @@ fn records_and_tombstones() {
         &WithRef,
         &event(false, Some(json!({ "ref": "17", "name": "A" }))),
     )
+    .unwrap()
     .unwrap();
     assert_eq!(r.key, K.to_ascii_lowercase());
     assert_eq!(
@@ -85,19 +88,24 @@ fn records_and_tombstones() {
         ("customer", 4, false)
     );
     assert_eq!(r.external_id.as_deref(), Some("17"));
-    let t = record(&WithRef, &event(true, Some(json!({ "ref": "17" })))).unwrap();
+    let t = record(&WithRef, &event(true, Some(json!({ "ref": "17" }))))
+        .unwrap()
+        .unwrap();
     assert_eq!((t.deleted, t.external_id, t.data), (true, None, None));
     let too_long = record(
         &WithRef,
         &event(false, Some(json!({ "ref": "9".repeat(65) }))),
     )
+    .unwrap()
     .unwrap();
     assert_eq!(too_long.external_id, None);
-    let nothing = record(&Nothing, &event(false, Some(json!({ "name": "A" })))).unwrap();
+    let nothing = record(&Nothing, &event(false, Some(json!({ "name": "A" }))))
+        .unwrap()
+        .unwrap();
     assert_eq!(nothing.data, None, "default keeps no data");
     let mut other = event(false, Some(json!({})));
     other.event_type = "urn:example:crm:contact".into();
-    assert!(record(&WithRef, &other).is_none());
+    assert!(record(&WithRef, &other).unwrap().is_none());
 }
 
 #[derive(Default)]
@@ -121,4 +129,52 @@ async fn adapter_maps_pages() {
         .unwrap();
     assert_eq!(n, 1);
     assert_eq!(*replica.store().0.lock().unwrap(), [(1, 9)]);
+}
+
+#[test]
+fn types_sharing_a_kind_keep_their_own_fields() {
+    let v2 = "urn:example:crm:customer.v2";
+    let m = KeepFields::new()
+        .keep(T, "customer", &["name"])
+        .unwrap()
+        .keep(v2, "customer", &["displayName"])
+        .unwrap();
+    let data = json!({ "name": "Old", "displayName": "New" });
+    assert_eq!(m.kind(v2), Some("customer"));
+    assert_eq!(m.project(T, &data).data, Some(json!({ "name": "Old" })));
+    assert_eq!(
+        m.project(v2, &data).data,
+        Some(json!({ "displayName": "New" }))
+    );
+}
+
+/// Returns a kind that does not fit the column.
+struct TooLong;
+
+impl Mapping for TooLong {
+    fn kind(&self, _: &str) -> Option<&str> {
+        Some("a-kind-that-is-much-longer-than-32-characters")
+    }
+}
+
+#[tokio::test]
+async fn invalid_kinds_are_rejected() {
+    assert_eq!(KeepFields::new().keep(T, "", &[]).unwrap_err(), InvalidKind);
+    assert!(KeepFields::new().keep(T, &"k".repeat(33), &[]).is_err());
+    assert!(KeepFields::new().keep(T, &"k".repeat(32), &[]).is_ok());
+    assert_eq!(
+        record(&TooLong, &event(false, Some(json!({})))),
+        Err(InvalidKind)
+    );
+    let replica = Replica::new(Store::default(), TooLong);
+    assert!(
+        replica
+            .apply_page("crm", &[event(false, Some(json!({})))], 1)
+            .await
+            .is_err()
+    );
+    assert!(
+        replica.store().0.lock().unwrap().is_empty(),
+        "nothing written"
+    );
 }

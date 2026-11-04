@@ -54,7 +54,9 @@ pub struct CursorState {
 /// One run per source at a time, across all instances of the app (e.g. `GET_LOCK` on a held database
 /// connection).
 pub trait RunLock: Send + Sync {
-    /// Proof of the held lock; given back to [`RunLock::unlock`].
+    /// Proof of the held lock; given back to [`RunLock::unlock`]. A guard that is dropped without
+    /// `unlock` (the run was cancelled or panicked) must still release the lock, e.g. by closing the
+    /// connection that holds it.
     type Guard: Send;
 
     /// Takes the lock of `source` without waiting; `None` when another run holds it.

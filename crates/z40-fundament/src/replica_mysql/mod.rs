@@ -17,6 +17,7 @@ mod read;
 pub use lock::MySqlLockGuard;
 pub use read::{StoredEvent, StoredRecord};
 
+use crate::replica::{InvalidKind, check_kind};
 use sqlx::{AssertSqlSafe, MySqlPool};
 
 /// Events are kept this many days.
@@ -92,7 +93,9 @@ impl Tables {
     }
 }
 
-/// The MariaDB/MySQL store of a consumer and its replica.
+/// The MariaDB/MySQL store of a consumer and its replica. A run holds one connection for the lock and
+/// uses a second one for each transaction, so the pool needs **at least 2** connections
+/// (`max_connections`); with one it waits forever.
 #[derive(Debug, Clone)]
 pub struct MySqlStore {
     pool: MySqlPool,
@@ -110,10 +113,13 @@ impl MySqlStore {
         }
     }
 
-    /// The `kind` of the events written on a change of a source (default [`DEFAULT_EVENT_KIND`]).
-    pub fn event_kind(mut self, kind: impl Into<String>) -> Self {
-        self.event_kind = kind.into();
-        self
+    /// The `kind` of the events written on a change of a source (default [`DEFAULT_EVENT_KIND`],
+    /// 1 to 32 characters).
+    pub fn event_kind(mut self, kind: impl Into<String>) -> Result<Self, InvalidKind> {
+        let kind = kind.into();
+        check_kind(&kind)?;
+        self.event_kind = kind;
+        Ok(self)
     }
 
     /// The pool.
@@ -153,5 +159,14 @@ mod tests {
         }
         assert!(Tables::new("a", "", "c").is_err());
         assert!(Tables::new("r", "c", "e").unwrap().schema().contains("`e`"));
+    }
+
+    #[tokio::test]
+    async fn event_kind_length() {
+        let pool = MySqlPool::connect_lazy("mysql://x@127.0.0.1:1/x").unwrap();
+        let s = MySqlStore::new(pool, Tables::with_prefix("").unwrap());
+        assert!(s.clone().event_kind("bezug").is_ok());
+        assert_eq!(s.clone().event_kind("").unwrap_err(), InvalidKind);
+        assert!(s.event_kind("k".repeat(33)).is_err());
     }
 }

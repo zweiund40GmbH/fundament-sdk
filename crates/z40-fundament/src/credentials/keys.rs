@@ -66,7 +66,8 @@ fn to_hex(bytes: &[u8]) -> String {
 
 /// Parses exactly 64 hex characters (any case).
 fn parse_hex(s: &str) -> Option<[u8; 32]> {
-    if s.len() != 64 || !s.is_ascii() {
+    // `from_str_radix` would accept a leading `+`; only hex digits are allowed.
+    if s.len() != 64 || !s.bytes().all(|b| b.is_ascii_hexdigit()) {
         return None;
     }
     let mut out = [0u8; 32];
@@ -182,6 +183,10 @@ mod tests {
         }
         assert!(KeyList::parse(&format!("a={}", "g".repeat(64))).is_err());
         assert!(KeyList::parse(&format!("a={}", "a".repeat(63))).is_err());
+        assert!(
+            KeyList::parse(&format!("a=+a{}", "a".repeat(62))).is_err(),
+            "no sign"
+        );
         assert_eq!(
             KeyList::parse(&format!("{}={h}", "n".repeat(65))),
             Err(KeyListError::InvalidName(1))

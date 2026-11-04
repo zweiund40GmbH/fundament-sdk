@@ -45,6 +45,11 @@ struct Window {
 
 /// Failed attempts per client address in fixed windows. Share one instance (e.g. in an `Arc`) between
 /// all endpoints that check the same kind of key.
+///
+/// Memory is bounded to 10 000 addresses. When the map is full, expired windows are dropped first; if
+/// it is still full (an attack from very many addresses), **new** addresses are not tracked and thus
+/// not braked, while known addresses keep being counted. The brake only slows guessing; the security
+/// rests on the length of the keys.
 #[derive(Debug, Default)]
 pub struct FailureBrake(Mutex<HashMap<IpAddr, Window>>);
 

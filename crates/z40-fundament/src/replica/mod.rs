@@ -17,6 +17,23 @@ use std::future::Future;
 
 /// Longest stored external id; longer ids are dropped.
 pub const EXTERNAL_ID_MAX: usize = 64;
+/// Longest kind (column width of the replica and event tables).
+pub const KIND_MAX: usize = 32;
+
+/// A kind is empty or longer than [`KIND_MAX`] characters.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("kind must be 1 to 32 characters")]
+pub struct InvalidKind;
+
+/// Checks a kind (`Ok` if it has 1 to [`KIND_MAX`] characters).
+pub fn check_kind(kind: &str) -> Result<(), InvalidKind> {
+    let n = kind.chars().count();
+    if (1..=KIND_MAX).contains(&n) {
+        Ok(())
+    } else {
+        Err(InvalidKind)
+    }
+}
 
 /// What a mapping keeps of one record state.
 #[derive(Debug, Clone, Default, PartialEq)]
@@ -30,13 +47,15 @@ pub struct Projection {
 
 /// Decides what the app keeps of the feed.
 pub trait Mapping: Send + Sync {
-    /// The kind stored for events of `event_type` (at most 32 characters, e.g. `customer`), or
-    /// `None` to skip events of that type.
+    /// The kind stored for events of `event_type` (1 to [`KIND_MAX`] characters, e.g. `customer`), or
+    /// `None` to skip events of that type. Several types may share a kind (e.g. `…customer` and
+    /// `…customer.v2` during a transition).
     fn kind(&self, event_type: &str) -> Option<&str>;
 
-    /// What is kept of the state `data` of a record of `kind`. The default keeps nothing.
-    fn project(&self, kind: &str, data: &Value) -> Projection {
-        let _ = (kind, data);
+    /// What is kept of the state `data` of an event of `event_type`. Keyed by the type, not the kind,
+    /// so types sharing a kind can differ in their fields. The default keeps nothing.
+    fn project(&self, event_type: &str, data: &Value) -> Projection {
+        let _ = (event_type, data);
         Projection::default()
     }
 }
@@ -58,14 +77,18 @@ pub struct Record {
     pub data: Option<Value>,
 }
 
-/// The record of `event` under `mapping`; `None` for types the mapping skips.
-pub fn record(mapping: &impl Mapping, event: &FeedEvent) -> Option<Record> {
-    let kind = mapping.kind(&event.event_type)?;
+/// The record of `event` under `mapping`; `Ok(None)` for types the mapping skips, `Err` when the
+/// mapping returns an invalid kind.
+pub fn record(mapping: &impl Mapping, event: &FeedEvent) -> Result<Option<Record>, InvalidKind> {
+    let Some(kind) = mapping.kind(&event.event_type) else {
+        return Ok(None);
+    };
+    check_kind(kind)?;
     let projection = event
         .state()
-        .map(|data| mapping.project(kind, data))
+        .map(|data| mapping.project(&event.event_type, data))
         .unwrap_or_default();
-    Some(Record {
+    Ok(Some(Record {
         kind: kind.to_owned(),
         key: event.key.to_ascii_lowercase(),
         version: event.version,
@@ -74,7 +97,7 @@ pub fn record(mapping: &impl Mapping, event: &FeedEvent) -> Option<Record> {
             .external_id
             .filter(|id| id.chars().count() <= EXTERNAL_ID_MAX),
         data: projection.data,
-    })
+    }))
 }
 
 /// Stores records of the replica.
@@ -117,10 +140,12 @@ impl<S: ReplicaStore, M: Mapping> PageSink for Replica<S, M> {
         events: &[FeedEvent],
         next_cursor: u64,
     ) -> Result<usize, StoreError> {
-        let records: Vec<Record> = events
-            .iter()
-            .filter_map(|e| record(&self.mapping, e))
-            .collect();
+        let mut records = Vec::with_capacity(events.len());
+        for e in events {
+            if let Some(r) = record(&self.mapping, e).map_err(StoreError::new)? {
+                records.push(r);
+            }
+        }
         self.store
             .apply_records(source, &records, next_cursor)
             .await
