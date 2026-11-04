@@ -36,19 +36,32 @@ impl FailureCounter {
     /// figure is advisory; retrying could pile up).
     async fn write<S: FeedSourceStore>(&self, store: &S) {
         loop {
+            // Gives the writer role back also when the store panics, so later failures still get
+            // written.
+            let role = Release(&self.writing);
             let n = self.pending.swap(0, Ordering::SeqCst);
             if n > 0
                 && let Err(e) = store.record_failures(n, Utc::now()).await
             {
                 tracing::warn!(error = %e, count = n, "failed feed attempts could not be counted");
             }
-            self.writing.store(false, Ordering::SeqCst);
+            drop(role);
             // A failure counted after the swap but before the release found the role taken: take it
             // back and write it, unless another task did.
             if self.pending.load(Ordering::SeqCst) == 0 || !self.try_start() {
                 return;
             }
         }
+    }
+}
+
+/// Resets the writer flag when dropped.
+struct Release<'a>(&'a AtomicBool);
+
+impl Drop for Release<'_> {
+    /// Gives the writer role back.
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
     }
 }
 
@@ -69,6 +82,7 @@ mod tests {
         max_in_flight: AtomicU64,
         calls: AtomicU64,
         total: AtomicU64,
+        panic_first: AtomicBool,
     }
 
     impl Blocking {
@@ -79,6 +93,7 @@ mod tests {
                 max_in_flight: AtomicU64::new(0),
                 calls: AtomicU64::new(0),
                 total: AtomicU64::new(0),
+                panic_first: AtomicBool::new(false),
             }
         }
     }
@@ -97,6 +112,9 @@ mod tests {
             Ok(())
         }
         async fn record_failures(&self, n: u64, _: DateTime<Utc>) -> Result<(), StoreError> {
+            if self.panic_first.swap(false, Ordering::SeqCst) {
+                panic!("store panics");
+            }
             let now = self.in_flight.fetch_add(1, Ordering::SeqCst) + 1;
             self.max_in_flight.fetch_max(now, Ordering::SeqCst);
             self.calls.fetch_add(1, Ordering::SeqCst);
@@ -136,6 +154,27 @@ mod tests {
         assert!(
             store.calls.load(Ordering::SeqCst) <= 3,
             "pending counts written together"
+        );
+    }
+
+    #[tokio::test]
+    async fn a_panicking_store_does_not_stop_counting() {
+        let store = Arc::new(Blocking::new());
+        store.panic_first.store(true, Ordering::SeqCst);
+        store.gate.add_permits(10);
+        let counter = Arc::new(FailureCounter::default());
+        counter.count(&store);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            !counter.writing.load(Ordering::SeqCst),
+            "role given back after the panic"
+        );
+        counter.count(&store);
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert_eq!(
+            store.total.load(Ordering::SeqCst),
+            1,
+            "the next failure is written"
         );
     }
 }

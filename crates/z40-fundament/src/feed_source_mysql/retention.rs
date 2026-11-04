@@ -11,6 +11,17 @@ use std::time::Duration;
 
 /// Hours the failed-attempt counters are kept (the status reports 24 hours).
 pub const FAILURE_RETENTION_HOURS: i64 = 48;
+/// Deletes the superseded old events of one id window (`after`, `end`, `after`, `end`, `cutoff`). The
+/// outer `id` range keeps the delete on the primary key: MariaDB merges the derived table, and without
+/// it the outer `DELETE` scans the whole table per window. The derived table lets MariaDB/MySQL delete
+/// from the table the subquery reads.
+pub(super) const PURGE_WINDOW: &str = "DELETE FROM {outbox} WHERE `id` > ? AND `id` <= ? AND `id` IN (\
+    SELECT `id` FROM (SELECT o.`id` FROM {outbox} o \
+      WHERE o.`id` > ? AND o.`id` <= ? AND o.`cursor` IS NOT NULL AND o.`occurred_at` < ? \
+        AND EXISTS (SELECT 1 FROM {outbox} n WHERE n.`type` = o.`type` \
+          AND n.`record_key` = o.`record_key` AND n.`version` > o.`version` \
+          AND n.`cursor` IS NOT NULL)) AS superseded)";
+
 /// Rows scanned per batch (a window of consecutive ids; short transactions).
 const WINDOW: u32 = 1000;
 
@@ -59,8 +70,7 @@ impl MySqlSource {
     }
 
     /// Deletes the superseded old events with an id in `(after, end]` of the next window; returns the
-    /// window end and the number deleted, or `None` when no id follows `after`. The derived table lets
-    /// MariaDB/MySQL delete from the table the subquery reads.
+    /// window end and the number deleted, or `None` when no id follows `after`.
     pub(super) async fn purge_window(
         &self,
         after: u64,
@@ -76,21 +86,20 @@ impl MySqlSource {
             .await
             .map_err(db)?;
         let mut tx = sqlx::Connection::begin(&mut *conn).await.map_err(db)?;
-        let r = sqlx::query(self.tables.sql(
-            "DELETE FROM {outbox} WHERE `id` IN (SELECT `id` FROM (\
-               SELECT o.`id` FROM {outbox} o \
-               WHERE o.`id` > ? AND o.`id` <= ? AND o.`cursor` IS NOT NULL AND o.`occurred_at` < ? \
-                 AND EXISTS (SELECT 1 FROM {outbox} n WHERE n.`type` = o.`type` \
-                   AND n.`record_key` = o.`record_key` AND n.`version` > o.`version` \
-                   AND n.`cursor` IS NOT NULL)) AS superseded)",
-        ))
-        .bind(after)
-        .bind(end)
-        .bind(cutoff)
-        .execute(&mut *tx)
-        .await
-        .map_err(db)?;
+        let r = sqlx::query(self.tables.sql(PURGE_WINDOW))
+            .bind(after)
+            .bind(end)
+            .bind(after)
+            .bind(end)
+            .bind(cutoff)
+            .execute(&mut *tx)
+            .await
+            .map_err(db)?;
         tx.commit().await.map_err(db)?;
         Ok(Some((end, r.rows_affected())))
     }
 }
+
+#[cfg(test)]
+#[path = "retention_tests.rs"]
+mod tests;

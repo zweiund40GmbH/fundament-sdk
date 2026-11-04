@@ -33,8 +33,8 @@ Planned as 0.2.0 (new features and one breaking change).
   at the 0.1.0 path.
 - `FeedConsumerConfig::disabled()` and `Default` (the off state).
 - `StatusEndpoint::on_failed_attempt` (hook on every `401`) and the type `FailedAttemptHook`.
-- `MySqlStore::recent_events` accepts any integer limit (`impl TryInto<u32>`), e.g. `status::MAX_EVENTS`;
-  existing calls with `u32` or literals compile unchanged.
+- `MySqlStore::recent_events` accepts any integer limit, e.g. `status::MAX_EVENTS` (negative counts as 0);
+  most existing calls (a `u32` or a literal) compile unchanged.
 - `docs/protocol.md` §2.5: a consumer that changes `types` resyncs from `since=0`. §2.1: cursors follow the
   order of origin (the text said "commit order").
 - `StoreError` is also available at the crate root (`z40_fundament::StoreError`); `consumer::StoreError`

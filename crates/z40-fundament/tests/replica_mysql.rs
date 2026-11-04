@@ -102,6 +102,18 @@ async fn run_results_events_and_reset() {
             .recent_events(t0 - Duration::minutes(1), 100)
             .await
             .unwrap();
+        let none = s
+            .recent_events(t0 - Duration::minutes(1), -1)
+            .await
+            .unwrap();
+        assert!(none.is_empty(), "a negative limit counts as 0");
+        let max: usize = 100; // e.g. `status::MAX_EVENTS`
+        assert_eq!(
+            s.recent_events(t0 - Duration::minutes(1), max)
+                .await
+                .unwrap(),
+            ev
+        );
         let texts: Vec<_> = ev
             .iter()
             .map(|e| (e.level, e.text.as_str(), e.kind.as_str()))
