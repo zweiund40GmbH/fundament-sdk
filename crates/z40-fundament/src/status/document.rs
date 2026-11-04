@@ -2,9 +2,9 @@
 //! English; the JSON names (some German) are part of the wire format and fixed by `serde` renames.
 //!
 //! Reading is lenient (`docs/protocol.md` §3.3): unknown fields are ignored, missing lists are empty,
-//! missing counters are `0`, a missing `version` or `stand` is an empty string and missing `null`able
-//! fields are `None`. The `serde(default)`s only affect reading; a built document always writes every
-//! field.
+//! a missing `version` or `stand` is an empty string and missing `null`able fields are `None`. The
+//! figures (`letzterCursor`, `ereignisseProMinute`, `ereignisse24h`, `rueckstand`) are required, so `0`
+//! always means 0. The `serde(default)`s only affect reading; a built document writes every field.
 
 use crate::protocol::Level;
 use serde::{Deserialize, Serialize};
@@ -60,13 +60,13 @@ pub struct Offer {
     #[serde(rename = "typ")]
     pub record_type: String,
     /// Newest cursor of the type (`letzterCursor`).
-    #[serde(rename = "letzterCursor", default)]
+    #[serde(rename = "letzterCursor")]
     pub last_cursor: u64,
     /// Events per minute, one decimal (`ereignisseProMinute`).
-    #[serde(rename = "ereignisseProMinute", default)]
+    #[serde(rename = "ereignisseProMinute")]
     pub events_per_minute: f64,
     /// Events in the last 24 hours (`ereignisse24h`).
-    #[serde(rename = "ereignisse24h", default)]
+    #[serde(rename = "ereignisse24h")]
     pub events_24h: u64,
 }
 
@@ -84,7 +84,7 @@ pub struct Poller {
     /// Cursor of that poll (`cursor`).
     pub cursor: Option<u64>,
     /// Events after `cursor`, capped at [`super::BACKLOG_CAP`] (`rueckstand`).
-    #[serde(rename = "rueckstand", default)]
+    #[serde(rename = "rueckstand")]
     pub backlog: u64,
     /// Failed attempts of this client in 24 hours; `None` when they cannot be attributed
     /// (`fehlversuche24h`).

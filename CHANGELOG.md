@@ -15,12 +15,13 @@ All notable changes to this project are documented in this file. The format is b
   logged, never the key or the body. `StatusDocument::from_json` parses leniently (protocol §3.3).
   `StatusKeys::from_lookup` reads `<PREFIX>_STATUS_KEYS` (`app=key,…`, one key per app, redacted `Debug`);
   `StatusTarget` and `poll_all` poll many apps with bounded concurrency. `ConfigErrorKind::StatusKeys`.
-- `docs/protocol.md` §3.3: how a client reads the status document (additive).
+- `docs/protocol.md` §3.3: how a client reads the status document; §3.1 gains the fixed text
+  `Zeitüberschreitung` (additive).
 
 ### Changed
 
-- `status`: reading a `StatusDocument` accepts a missing `version`, `stand`, `letzterCursor`,
-  `ereignisseProMinute`, `ereignisse24h` and `rueckstand` (defaults); the written document is unchanged. The
+- `status`: reading a `StatusDocument` accepts a missing `version` or `stand` (empty string); the figures stay
+  required. The written document is unchanged. The
   `document` module is also available with `status-client` alone.
 - `feed-consumer`: the HTTP setup (origin check, client builder, bounded body reader, cause chain) is shared
   with the status client; an announced `Content-Length` above the page limit is refused before reading (same

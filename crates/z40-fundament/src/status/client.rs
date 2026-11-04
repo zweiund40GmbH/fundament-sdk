@@ -35,8 +35,7 @@ pub enum StatusFetchError {
 
 impl StatusFetchError {
     /// The fixed German text, e.g. for a monitoring view: `nicht erreichbar`, `Zeitüberschreitung`,
-    /// `HTTP <status>`, `Antwort ungültig` (the same texts as for a consumed feed, `docs/protocol.md` §3.1,
-    /// plus the timeout).
+    /// `HTTP <status>`, `Antwort ungültig` (`docs/protocol.md` §3.1).
     pub fn text(self) -> String {
         match self {
             StatusFetchError::Unreachable => "nicht erreichbar".to_owned(),

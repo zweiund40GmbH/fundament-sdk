@@ -224,6 +224,7 @@ and codes. The texts of a consumed feed are:
 | `nicht erreichbar` | Connection, TLS or timeout problem. |
 | `HTTP <status>`, e.g. `HTTP 503` | The source answered with a non-success status. |
 | `Antwort ungültig` | The page was invalid (§2.2) or too large. |
+| `Zeitüberschreitung` | Reading a status (§3.3): no complete answer within 2 seconds. |
 | `Abruf fehlgeschlagen` | The last run failed without a stored text. |
 | `kein erfolgreicher Abruf seit über <n> Minuten` | The last success is older than the threshold. |
 
@@ -249,13 +250,14 @@ trusted reverse proxy forwards – `X-Forwarded-For` from anyone else is ignored
 A client (e.g. monitoring) reads the document leniently, so apps can add fields and send less:
 
 - Unknown fields are ignored.
-- Missing lists (`hinweise`, `angebote`, `abrufer`, `bezieht`, `ereignisse`) count as empty; missing figures
-  (`letzterCursor`, `ereignisseProMinute`, `ereignisse24h`, `rueckstand`) as `0`; missing `version` and `stand` as
-  unknown; missing `null`able fields as `null`.
+- Missing lists (`hinweise`, `angebote`, `abrufer`, `bezieht`, `ereignisse`) count as empty; missing `version`
+  and `stand` as unknown (an empty string); missing `null`able fields (`letzterAbruf`, `cursor`,
+  `fehlversuche24h`, `text` of `bezieht`) as `null`.
 - Required are `app` (not empty) and `zustand`, and in each entry `stufe`, `text`, `art`, `typ`, `name`,
-  `quelle`, `zustand` and `zeit` where listed above. A required field that is missing or invalid (an unknown level,
-  a time that is not RFC 3339, a negative figure) makes the **whole** answer invalid (`Antwort ungültig`).
+  `quelle`, `zustand` and `zeit` where listed above, as well as the figures `letzterCursor`,
+  `ereignisseProMinute`, `ereignisse24h` and `rueckstand` (every producer sends them, so `0` always means 0). A required field that is
+  missing or invalid (an unknown level, a time that is not RFC 3339, a negative figure) makes the **whole** answer invalid (`Antwort ungültig`).
 - The client sends each app only the status key of that app, follows no redirects, waits at most 2 seconds for
   the complete answer and reads at most 256 KiB. Its fixed texts are those of §3.1 (`nicht erreichbar`,
-  `HTTP <status>`, `Antwort ungültig`) plus `Zeitüberschreitung` when no complete answer came within 2 seconds.
+  `HTTP <status>`, `Antwort ungültig`, `Zeitüberschreitung`).
 - Texts are data from another app: shown encoded, never interpreted.

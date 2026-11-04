@@ -126,15 +126,11 @@ mod tests {
         assert!(doc.notes.is_empty() && doc.offers.is_empty() && doc.pollers.is_empty());
         assert!(doc.sources.is_empty() && doc.events.is_empty());
         let mut v = example();
-        v["angebote"][0] = json!({ "art": "feed", "typ": "urn:example:t", "x": true });
-        v["abrufer"][0] = json!({ "name": "crm", "art": "feed" });
+        v["angebote"][0]["x"] = json!(true);
+        v["abrufer"][0] = json!({ "name": "crm", "art": "feed", "rueckstand": 0 });
         v["bezieht"][0] = json!({ "quelle": "crm", "art": "feed", "zustand": "warnung" });
         let doc = parse(&v).unwrap();
-        let (o, p, s) = (&doc.offers[0], &doc.pollers[0], &doc.sources[0]);
-        assert_eq!(
-            (o.last_cursor, o.events_per_minute, o.events_24h),
-            (0, 0.0, 0)
-        );
+        let (p, s) = (&doc.pollers[0], &doc.sources[0]);
         assert_eq!(
             (p.last_poll.as_deref(), p.cursor, p.backlog),
             (None, None, 0)
@@ -177,10 +173,21 @@ mod tests {
             *v.pointer_mut(path).unwrap() = value;
             assert_eq!(parse(&v), Err(InvalidDocument(field)), "{path}");
         }
-        for required in ["app", "zustand"] {
+        for (path, field) in [
+            ("", "app"),
+            ("", "zustand"),
+            ("/angebote/0", "letzterCursor"),
+            ("/angebote/0", "ereignisseProMinute"),
+            ("/angebote/0", "ereignisse24h"),
+            ("/abrufer/0", "rueckstand"),
+        ] {
             let mut v = example();
-            v.as_object_mut().unwrap().remove(required);
-            assert_eq!(parse(&v), Err(InvalidDocument("JSON")), "{required}");
+            v.pointer_mut(path)
+                .unwrap()
+                .as_object_mut()
+                .unwrap()
+                .remove(field);
+            assert_eq!(parse(&v), Err(InvalidDocument("JSON")), "{path}/{field}");
         }
     }
 }
