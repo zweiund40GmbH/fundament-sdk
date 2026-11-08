@@ -28,8 +28,12 @@
 //! **Login limit.** Each `GET <base>/login` writes a row before anyone is authenticated, so starts are
 //! limited per client address and in total (`<PREFIX>_LOGIN_RATE_PER_IP`, `<PREFIX>_LOGIN_RATE_TOTAL`,
 //! default 30 and 300 per minute, counted per process); more get `429` and write nothing. Behind a
-//! reverse proxy pass `TrustedProxies::resolver()` to [`BffBuilder::client_ip`]. Run the store's cleanup
-//! for logins that never came back.
+//! reverse proxy pass `TrustedProxies::resolver()` to [`BffBuilder::client_ip`] (the default, the TCP
+//! peer, warns once when the peer is a loopback or private address). The answer carries
+//! `Retry-After: 60`. Residual risk: a flood from many addresses (many /64s) can use up the total and
+//! block new logins for everyone until the window ends; existing sessions are unaffected. Counters are
+//! per instance, so N instances allow N times the limit. Run the store's cleanup for logins that never
+//! came back.
 //!
 //! **Back-channel logout** ends the sessions of the token's `sid`; if none has it, the sessions of its
 //! `sub` without `sid`; a token without `sid` ends all sessions of `sub`. A logout that arrives while a

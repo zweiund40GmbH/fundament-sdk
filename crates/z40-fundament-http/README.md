@@ -135,8 +135,11 @@ let app = Router::new()
 - **Login limit:** each `GET <base>/login` writes a row before anyone is authenticated, so starts are limited
   per client address (IPv6 by /64) and in total, per minute and process (`<PREFIX>_LOGIN_RATE_PER_IP` = 30,
   `<PREFIX>_LOGIN_RATE_TOTAL` = 300, or `.login_limit(per_ip, total)`); more get `429` with the German page
-  and write nothing. Pass `.client_ip(proxies.resolver())` behind a proxy; without a client address all
-  share one counter (warned once). `.without_login_limit()` if the app limits it itself.
+  and write nothing, with `Retry-After: 60`. Pass `.client_ip(proxies.resolver())` behind a proxy (the
+  default, the TCP peer, warns once when that peer is a loopback or private address); without a client
+  address all share one counter (warned once). `.without_login_limit()` if the app limits it itself.
+  Residual risk: a flood from many /64s can use up the total and block new logins for everyone for the rest
+  of the minute (existing sessions are unaffected); counters are per instance (N instances → N× limit).
 - **Settings:** `BffConfig` is built with `from_lookup` or `BffConfig::new`; `build()` checks the URLs again.
 
 Variables: [`docs/configuration.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/docs/configuration.md).

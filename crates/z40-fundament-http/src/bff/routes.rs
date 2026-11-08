@@ -14,7 +14,7 @@ use super::token::{self, TokenHash};
 use super::{Bff, BffError, DATA_MAX, SID_MAX, SUB_MAX, SessionData, cookies};
 use axum::Router;
 use axum::extract::{Request, State};
-use axum::http::{HeaderMap, Uri};
+use axum::http::{HeaderMap, HeaderValue, Uri, header};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
 use chrono::{TimeDelta, Utc};
@@ -44,6 +44,10 @@ impl<T: SessionData> Bff<T> {
         let page = (self.inner.error_page)(&failure);
         let (mut parts, body) = page.into_parts();
         append_all(&mut parts.headers, headers);
+        if failure == LoginFailure::RateLimited {
+            let wait = HeaderValue::from_static("60");
+            parts.headers.insert(header::RETRY_AFTER, wait);
+        }
         no_store(Response::from_parts(parts, body))
     }
 }

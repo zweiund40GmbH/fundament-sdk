@@ -2,7 +2,7 @@
 //! [`BffBuilder::build`].
 
 use super::cookies::Cookies;
-use super::limit::{self, ClientIpFn, LoginLimit};
+use super::limit::{ClientIpFn, LoginLimit};
 use super::page;
 use super::store::DynStore;
 use super::{
@@ -28,7 +28,7 @@ pub struct BffBuilder<T> {
     error_page: ErrorPage,
     options: Options,
     limit: Option<(u32, u32)>,
-    client_ip: ClientIpFn,
+    client_ip: Option<ClientIpFn>,
 }
 
 impl<T> std::fmt::Debug for BffBuilder<T> {
@@ -60,7 +60,7 @@ impl<T: SessionData> Bff<T> {
             base: "/api/auth".to_owned(),
             scopes: vec!["profile".to_owned(), "email".to_owned()],
             limit,
-            client_ip: limit::connect_info(),
+            client_ip: None,
             error_page: Arc::new(page::default_page),
             options: Options::default(),
         }
@@ -109,7 +109,7 @@ impl<T: SessionData> BffBuilder<T> {
         mut self,
         resolve: impl Fn(&Parts) -> Option<IpAddr> + Send + Sync + 'static,
     ) -> Self {
-        self.client_ip = Arc::new(resolve);
+        self.client_ip = Some(Arc::new(resolve));
         self
     }
 

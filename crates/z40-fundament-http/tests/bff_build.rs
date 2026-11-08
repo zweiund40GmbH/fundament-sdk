@@ -39,6 +39,7 @@ async fn login_starts_are_limited_per_address_and_in_total() {
         .await;
     assert_eq!(res.status(), StatusCode::TOO_MANY_REQUESTS);
     assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
+    assert_eq!(res.headers()[header::RETRY_AFTER], "60");
     assert!(set_cookies(res.headers()).is_empty(), "no login cookie");
     assert!(text(res).await.contains("Zu viele Anmeldeversuche"));
     assert_eq!(rows(), 2, "the refused start wrote no row");

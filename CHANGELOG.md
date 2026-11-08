@@ -16,7 +16,8 @@ All notable changes to this project are documented in this file. The format is b
     present and not `same-origin`) and `POST <base>/backchannel-logout` (ends the sessions of `sid`, if none
     those of `sub` without `sid`; without `sid` all of `sub`).
   - Login starts limited per client address and in total (default 30 and 300 per minute, per process);
-    more get `429` and write nothing. No ID token is kept (no token in the logout URL).
+    more get `429` (`Retry-After: 60`) and write nothing; the default client address (TCP peer) warns once
+    when it is loopback or private. No ID token is kept (no token in the logout URL).
   - The login hook turns the verified login into the app's session data `T` (stored as JSON) or refuses it
     with `LoginDenied`.
   - `Session<T>` extractor (`401 UNAUTHENTICATED`) and `Option<Session<T>>`, `Bff::session(&headers)`,
