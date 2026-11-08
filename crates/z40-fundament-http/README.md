@@ -96,9 +96,9 @@ let bff = Bff::builder(config, store.clone(), |client, login| async move {
     Ok(User { name: login.claims.name.clone().unwrap_or_default(), roles: access.roles })
 })
 .cookie_name("crm")                // __Host-crm_sid, __Host-crm_login
-.base_path("/api/auth")            // /api/auth/login, /callback, /logout, /backchannel-logout
+.base_path("/api/auth")            // the default: /api/auth/login, /callback, /logout, /backchannel-logout
 .scopes(&["profile", "email", "roles"])
-.keep_id_token(true)               // id_token_hint at the logout (sealed, see below)
+.client_ip(proxies.resolver())     // client address for the login limit (behind a proxy)
 .build()?;
 
 async fn me(session: Session<User>) -> axum::Json<Vec<String>> { axum::Json(session.data.roles) }
@@ -112,8 +112,8 @@ let app = Router::new()
 ```
 
 - **Stored:** only the SHA-256 of the session and login cookie values. The login state (PKCE verifier, nonce)
-  and the optional ID token are sealed with AES-256-GCM under a key derived from the cookie value, so a copy
-  of the database reveals neither and needs no server key. No access or refresh token is kept.
+  is sealed with AES-256-GCM under a key derived from the login cookie value, so a copy of the database
+  does not reveal it and no server key is needed. No ID, access or refresh token is kept.
 - **Cookies:** `__Host-<name>_sid` (`HttpOnly; Secure; Path=/`, `SameSite=Strict` or `Lax`) and
   `__Host-<name>_login` (10 minutes, `SameSite=Lax`, single use). Only a plain-HTTP loopback redirect URI
   (local development) drops `Secure` and the prefix.
@@ -123,15 +123,21 @@ let app = Router::new()
   last use is written at most once a minute. Expired sessions are deleted on access and by `delete_expired`.
 - **`returnTo`:** only a path on the same origin (one leading `/`, no `//`, no `\`, visible ASCII, at most
   512 characters), otherwise `/`.
-- **Logout:** `POST <base>/logout` (behind the app's `Csrf` layer) ends the session and answers
-  `{"logoutUrl": "…"}` – the provider's logout with `id_token_hint` and `post_logout_redirect_uri`.
+- **Logout:** `POST <base>/logout` (behind the app's `Csrf` layer; additionally refused when
+  `Sec-Fetch-Site` is present and not `same-origin`) ends the session and answers `{"logoutUrl": "…"}` –
+  the provider's logout with `post_logout_redirect_uri` (no `id_token_hint`, no token in a URL).
   `POST <base>/backchannel-logout` (exempt from CSRF) verifies the logout token and ends the sessions of its
-  `sid`, without `sid` all of its `sub`; `200` or a bare `400`.
+  `sid` (if none has it: those of its `sub` without `sid`), without `sid` all of its `sub`; `200` or a bare
+  `400`.
 - **Errors:** login and callback answer with a short German HTML page (fixed texts, replaceable with
   `.error_page(…)`); the `Session` extractor with `401 {"code":"UNAUTHENTICATED",…}`. Use
   `Option<Session<T>>` or `bff.session(&headers)` for an own error shape.
-- **Rate limit:** each `GET <base>/login` writes a row before anyone is authenticated; limit it in the app
-  (e.g. a `route_layer` keyed on `ClientIp`).
+- **Login limit:** each `GET <base>/login` writes a row before anyone is authenticated, so starts are limited
+  per client address (IPv6 by /64) and in total, per minute and process (`<PREFIX>_LOGIN_RATE_PER_IP` = 30,
+  `<PREFIX>_LOGIN_RATE_TOTAL` = 300, or `.login_limit(per_ip, total)`); more get `429` with the German page
+  and write nothing. Pass `.client_ip(proxies.resolver())` behind a proxy; without a client address all
+  share one counter (warned once). `.without_login_limit()` if the app limits it itself.
+- **Settings:** `BffConfig` is built with `from_lookup` or `BffConfig::new`; `build()` checks the URLs again.
 
 Variables: [`docs/configuration.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/docs/configuration.md).
 

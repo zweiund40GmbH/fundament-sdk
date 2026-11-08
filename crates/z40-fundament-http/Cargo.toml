@@ -25,7 +25,7 @@ trace = ["dep:tower-http", "tower-http/trace", "axum/matched-path"]
 telemetry = ["dep:tracing-subscriber", "dep:tracing-log"]
 # Login and sessions for backend-for-frontend apps: OIDC login with `z40-auth`, session cookie, session
 # store trait and extractor, logout and back-channel logout.
-bff = ["dep:z40-auth", "dep:aws-lc-rs", "dep:base64", "dep:chrono", "dep:serde", "dep:tokio", "dep:url"]
+bff = ["z40-fundament/credentials", "dep:z40-auth", "dep:aws-lc-rs", "dep:base64", "dep:chrono", "dep:serde", "dep:tokio", "dep:url"]
 # MariaDB/MySQL (sqlx) implementation of the session store of `bff`.
 bff-mysql = ["bff", "dep:sqlx"]
 

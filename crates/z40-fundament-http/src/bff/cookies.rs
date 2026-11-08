@@ -118,9 +118,9 @@ pub fn cookie_value(headers: &HeaderMap, name: &str) -> Option<String> {
         .filter_map(|v| v.to_str().ok())
         .flat_map(|v| v.split(';'))
         .filter_map(|pair| pair.trim().split_once('='))
-        .find(|(k, _)| *k == name)
+        .filter(|(k, v)| *k == name && !v.trim().is_empty())
         .map(|(_, v)| v.trim().to_owned())
-        .filter(|v| !v.is_empty())
+        .next()
 }
 
 /// Appends `cookie` as a `Set-Cookie` header (values built here are always valid header values).
@@ -188,6 +188,12 @@ mod tests {
         assert_eq!(c.session_value(&h).as_deref(), Some("abc"));
         assert_eq!(c.login_value(&h), None);
         assert_eq!(cookie_value(&h, "crm_sid"), None, "empty counts as absent");
+        h.append(header::COOKIE, HeaderValue::from_static("crm_sid=later"));
+        assert_eq!(
+            cookie_value(&h, "crm_sid").as_deref(),
+            Some("later"),
+            "an empty value does not hide a later one"
+        );
         assert_eq!(cookie_value(&h, "a").as_deref(), Some("1"));
     }
 }

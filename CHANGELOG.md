@@ -9,22 +9,26 @@ All notable changes to this project are documented in this file. The format is b
 ### Added
 
 - `z40-fundament-http`, feature `bff`: login and sessions for backend-for-frontend apps with `z40-auth` 0.5.
-  - `Bff::builder(config, store, on_login)` with `cookie_name`, `base_path`, `scopes`, `keep_id_token`,
-    `auth_options`, `error_page`; `Bff::router()` serves `GET <base>/login?returnTo=`, `GET <base>/callback`,
-    `POST <base>/logout` (answers `{"logoutUrl"}`, `id_token_hint` if kept) and
-    `POST <base>/backchannel-logout` (ends the sessions of `sid`, else of `sub`).
+  - `Bff::builder(config, store, on_login)` with `cookie_name`, `base_path` (default `/api/auth`), `scopes`,
+    `login_limit`, `without_login_limit`, `client_ip`, `auth_options`, `error_page`; `build()` checks the URLs
+    of the configuration again. `Bff::router()` serves `GET <base>/login?returnTo=`, `GET <base>/callback`,
+    `POST <base>/logout` (answers `{"logoutUrl"}` without `id_token_hint`; refused when `Sec-Fetch-Site` is
+    present and not `same-origin`) and `POST <base>/backchannel-logout` (ends the sessions of `sid`, if none
+    those of `sub` without `sid`; without `sid` all of `sub`).
+  - Login starts limited per client address and in total (default 30 and 300 per minute, per process);
+    more get `429` and write nothing. No ID token is kept (no token in the logout URL).
   - The login hook turns the verified login into the app's session data `T` (stored as JSON) or refuses it
     with `LoginDenied`.
   - `Session<T>` extractor (`401 UNAUTHENTICATED`) and `Option<Session<T>>`, `Bff::session(&headers)`,
     `Bff::end_sessions_of(sub)`.
-  - `SessionStore` trait; only SHA-256 hashes of cookie values are stored, the login state and the optional
-    ID token are sealed with AES-256-GCM under a key derived from the cookie value.
+  - `SessionStore` trait; only SHA-256 hashes of cookie values are stored, the login state is sealed with
+    AES-256-GCM under a key derived from the login cookie value.
   - Cookies `__Host-<name>_sid` (`SameSite=Strict` or `Lax`) and `__Host-<name>_login` (`Lax`, 10 minutes,
     single use); a new session id on every login.
   - Idle and absolute timeout; `return_to::sanitize` accepts only same-origin paths.
   - `BffConfig::from_lookup(prefix, lookup)`: `<PREFIX>_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET`,
     `_REDIRECT_URI`, `_POST_LOGOUT_REDIRECT_URI`, `_COOKIE_SAMESITE`, `_SESSION_IDLE_SECS`,
-    `_SESSION_MAX_SECS`.
+    `_SESSION_MAX_SECS`, `_LOGIN_RATE_PER_IP`, `_LOGIN_RATE_TOTAL`; `BffConfig::new` validates the URLs.
 - `z40-fundament-http`, feature `bff-mysql`: `MySqlSessionStore` with `SessionTables` (prefix or own names),
   `schema/mysql-session.sql` and `delete_expired(now)`.
 

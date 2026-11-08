@@ -23,7 +23,6 @@ type SessionRow = (
     String,
     Option<String>,
     String,
-    Option<Vec<u8>>,
     NaiveDateTime,
     NaiveDateTime,
     NaiveDateTime,
@@ -60,14 +59,13 @@ impl SessionStore for MySqlSessionStore {
     /// One `INSERT`.
     async fn create(&self, id: &TokenHash, s: &SessionRecord) -> Result<(), StoreError> {
         sqlx::query(self.tables.sql(
-            "INSERT INTO {session} (`id_hash`, `sub`, `sid`, `data`, `id_token`, `created_at`, \
-             `last_seen_at`, `expires_at`) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            "INSERT INTO {session} (`id_hash`, `sub`, `sid`, `data`, `created_at`, `last_seen_at`, \
+             `expires_at`) VALUES (?, ?, ?, ?, ?, ?, ?)",
         ))
         .bind(&id.as_bytes()[..])
         .bind(&s.sub)
         .bind(&s.sid)
         .bind(&s.data)
-        .bind(&s.id_token)
         .bind(ms(s.created_at))
         .bind(ms(s.last_seen_at))
         .bind(ms(s.expires_at))
@@ -80,24 +78,23 @@ impl SessionStore for MySqlSessionStore {
     /// By primary key.
     async fn load(&self, id: &TokenHash) -> Result<Option<SessionRecord>, StoreError> {
         let row: Option<SessionRow> = sqlx::query_as(self.tables.sql(
-            "SELECT `sub`, `sid`, `data`, `id_token`, `created_at`, `last_seen_at`, `expires_at` \
+            "SELECT `sub`, `sid`, `data`, `created_at`, `last_seen_at`, `expires_at` \
              FROM {session} WHERE `id_hash` = ?",
         ))
         .bind(&id.as_bytes()[..])
         .fetch_optional(&self.pool)
         .await
         .map_err(db)?;
-        Ok(row.map(
-            |(sub, sid, data, id_token, created, seen, expires)| SessionRecord {
+        Ok(
+            row.map(|(sub, sid, data, created, seen, expires)| SessionRecord {
                 sub,
                 sid,
                 data,
-                id_token,
                 created_at: created.and_utc(),
                 last_seen_at: seen.and_utc(),
                 expires_at: expires.and_utc(),
-            },
-        ))
+            }),
+        )
     }
 
     /// One `UPDATE` by primary key.
@@ -148,6 +145,19 @@ impl SessionStore for MySqlSessionStore {
             .execute(&self.pool)
             .await
             .map_err(db)?;
+        Ok(r.rows_affected())
+    }
+
+    /// Over the `sub` index.
+    async fn delete_by_sub_without_sid(&self, sub: &str) -> Result<u64, StoreError> {
+        let r = sqlx::query(
+            self.tables
+                .sql("DELETE FROM {session} WHERE `sub` = ? AND `sid` IS NULL"),
+        )
+        .bind(sub)
+        .execute(&self.pool)
+        .await
+        .map_err(db)?;
         Ok(r.rows_affected())
     }
 

@@ -60,6 +60,12 @@ impl SessionStore for MemoryStore {
         m.retain(|_, s| s.sub != sub);
         Ok((before - m.len()) as u64)
     }
+    async fn delete_by_sub_without_sid(&self, sub: &str) -> Result<u64, StoreError> {
+        let mut m = self.sessions.lock().unwrap();
+        let before = m.len();
+        m.retain(|_, s| s.sub != sub || s.sid.is_some());
+        Ok((before - m.len()) as u64)
+    }
     async fn put_login(&self, id: &TokenHash, login: &PendingLogin) -> Result<(), StoreError> {
         self.logins.lock().unwrap().insert(*id, login.clone());
         Ok(())

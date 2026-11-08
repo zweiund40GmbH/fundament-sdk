@@ -23,7 +23,6 @@ fn record(sub: &str, sid: Option<&str>, ends_in: i64) -> SessionRecord {
         sub: sub.to_owned(),
         sid: sid.map(str::to_owned),
         data: r#"{"name":"Erika"}"#.to_owned(),
-        id_token: Some(vec![1, 2, 3]),
         created_at: now,
         last_seen_at: now,
         expires_at: now + TimeDelta::seconds(ends_in),
@@ -65,6 +64,11 @@ async fn store_operations() {
                 1,
                 "exact, not case-insensitive"
             );
+            store
+                .create(&TokenHash::of("d"), &record("alice", None, 600))
+                .await
+                .unwrap();
+            assert_eq!(store.delete_by_sub_without_sid("alice").await.unwrap(), 1);
             assert_eq!(store.delete_by_sub("alice").await.unwrap(), 1);
             assert!(store.delete(&c).await.unwrap());
             assert!(!store.delete(&c).await.unwrap());
@@ -139,7 +143,7 @@ async fn login_round_trip_stores_only_hashes_and_sealed_values() {
             let res = app
                 .send(
                     Method::GET,
-                    &format!("/auth/callback?{}", a.query),
+                    &format!("/api/auth/callback?{}", a.query),
                     &login_cookie,
                     &[],
                     "",
@@ -149,26 +153,21 @@ async fn login_round_trip_stores_only_hashes_and_sealed_values() {
             let session = common::app::session_cookie(res.headers()).unwrap();
             let value = session.split_once('=').unwrap().1.to_owned();
 
-            type Row = (Vec<u8>, String, Option<String>, String, Option<Vec<u8>>);
-            let rows: Vec<Row> = sqlx::query_as(
-                "SELECT `id_hash`, `sub`, `sid`, `data`, `id_token` FROM `app_bff_session`",
-            )
-            .fetch_all(&pool)
-            .await
-            .unwrap();
+            type Row = (Vec<u8>, String, Option<String>, String);
+            let rows: Vec<Row> =
+                sqlx::query_as("SELECT `id_hash`, `sub`, `sid`, `data` FROM `app_bff_session`")
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap();
             assert_eq!(rows.len(), 1);
-            let (id_hash, sub, sid, data, id_token) = &rows[0];
+            let (id_hash, sub, sid, data) = &rows[0];
             assert_eq!(id_hash.as_slice(), TokenHash::of(&value).as_bytes());
             assert_eq!((sub.as_str(), sid.as_deref()), ("user-1", Some("sid-1")));
-            let sealed = id_token.as_ref().unwrap();
-            for stored in [data.as_bytes(), sealed.as_slice(), id_hash.as_slice()] {
+            for stored in [data.as_bytes(), id_hash.as_slice()] {
                 let text = String::from_utf8_lossy(stored);
                 assert!(!text.contains(&value) && !text.contains(&login_value));
             }
-            assert!(
-                !String::from_utf8_lossy(sealed).contains("eyJ"),
-                "ID token not in plain text"
-            );
+            assert!(!data.contains("eyJ"), "no token stored");
             let logins: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM `app_bff_login`")
                 .fetch_one(&pool)
                 .await
@@ -181,7 +180,13 @@ async fn login_round_trip_stores_only_hashes_and_sealed_values() {
             let body = format!("logout_token={token}");
             let form = ("content-type", "application/x-www-form-urlencoded");
             let res = app
-                .send(Method::POST, "/auth/backchannel-logout", "", &[form], &body)
+                .send(
+                    Method::POST,
+                    "/api/auth/backchannel-logout",
+                    "",
+                    &[form],
+                    &body,
+                )
                 .await;
             assert_eq!(res.status(), StatusCode::OK);
             let me = app.send(Method::GET, "/api/me", &session, &[], "").await;

@@ -14,6 +14,8 @@ pub const MSG_REJECTED: &str = "Die Anmeldung wurde abgelehnt. Bitte erneut anme
 /// Text when the login provider cannot be reached or its answer not be checked.
 pub const MSG_UNAVAILABLE: &str =
     "Die Anmeldung ist gerade nicht möglich. Bitte versuchen Sie es später erneut.";
+/// Text when too many logins were started.
+pub const MSG_RATE_LIMITED: &str = "Zu viele Anmeldeversuche. Bitte warten Sie eine Minute.";
 /// Text of an internal failure.
 pub const MSG_INTERNAL: &str = "Interner Fehler. Bitte versuchen Sie es später erneut.";
 
@@ -69,6 +71,8 @@ pub enum LoginFailure {
     Unavailable,
     /// Storage or randomness failed.
     Internal,
+    /// Too many login starts (per client address or in total).
+    RateLimited,
     /// The app's login hook refused.
     Denied(LoginDenied),
 }
@@ -80,6 +84,7 @@ impl LoginFailure {
             Self::Expired | Self::Rejected => StatusCode::BAD_REQUEST,
             Self::Unavailable => StatusCode::BAD_GATEWAY,
             Self::Internal => StatusCode::INTERNAL_SERVER_ERROR,
+            Self::RateLimited => StatusCode::TOO_MANY_REQUESTS,
             Self::Denied(d) => d.status,
         }
     }
@@ -91,6 +96,7 @@ impl LoginFailure {
             Self::Rejected => MSG_REJECTED,
             Self::Unavailable => MSG_UNAVAILABLE,
             Self::Internal => MSG_INTERNAL,
+            Self::RateLimited => MSG_RATE_LIMITED,
             Self::Denied(d) => d.message,
         }
     }
@@ -138,6 +144,10 @@ mod tests {
     fn statuses_and_texts() {
         assert_eq!(LoginFailure::Expired.status(), StatusCode::BAD_REQUEST);
         assert_eq!(LoginFailure::Unavailable.status(), StatusCode::BAD_GATEWAY);
+        assert_eq!(
+            LoginFailure::RateLimited.status(),
+            StatusCode::TOO_MANY_REQUESTS
+        );
         let denied = LoginFailure::Denied(LoginDenied::forbidden("Kein Zugang."));
         assert_eq!(
             (denied.status(), denied.message()),

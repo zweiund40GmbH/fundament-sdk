@@ -2,10 +2,9 @@
 //! (base64url, 43 characters); the server keeps only their SHA-256 ([`TokenHash`]), so a copy of the
 //! database cannot be turned into a valid cookie.
 //!
-//! Values that must be kept with a session or a started login but are only needed while the browser
-//! presents the cookie (the login state with the PKCE verifier, the ID token for the logout hint) are
-//! sealed with AES-256-GCM under a key derived from the cookie value. The key is
-//! never stored: the hash in the database is SHA-256 of the bare value, the key SHA-256 of a label plus
+//! The login state of a started login (PKCE verifier, nonce) is only needed while the browser presents
+//! the login cookie, so it is sealed with AES-256-GCM under a key derived from that cookie value. The
+//! key is never stored: the hash in the database is SHA-256 of the bare value, the key SHA-256 of a label plus
 //! the value, and neither reveals the other.
 
 use aws_lc_rs::aead::{AES_256_GCM, Aad, LessSafeKey, NONCE_LEN, Nonce, UnboundKey};
@@ -72,43 +71,26 @@ pub fn is_well_formed(s: &str) -> bool {
             .all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_')
 }
 
-/// What a sealed value is for; part of the key derivation, so a value sealed for one purpose never
-/// opens for another.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Purpose {
-    /// The serialized login state of a started login.
-    LoginState,
-    /// The ID token of a session (logout hint).
-    IdToken,
-}
+/// Label hashed in front of the login cookie value to derive the key of the sealed login state.
+const LOGIN_STATE_LABEL: &[u8] = b"z40-fundament-http/bff/login-state/v1\0";
 
-impl Purpose {
-    /// The label hashed in front of the cookie value.
-    fn label(self) -> &'static [u8] {
-        match self {
-            Self::LoginState => b"z40-fundament-http/bff/login-state/v1\0",
-            Self::IdToken => b"z40-fundament-http/bff/id-token/v1\0",
-        }
-    }
-}
-
-/// The AES-256-GCM key of `purpose` for the cookie value `token`.
-fn key(token: &str, purpose: Purpose) -> Result<LessSafeKey, CryptoError> {
+/// The AES-256-GCM key for the cookie value `token`.
+fn key(token: &str) -> Result<LessSafeKey, CryptoError> {
     let mut ctx = Context::new(&SHA256);
-    ctx.update(purpose.label());
+    ctx.update(LOGIN_STATE_LABEL);
     ctx.update(token.as_bytes());
     let unbound = UnboundKey::new(&AES_256_GCM, ctx.finish().as_ref()).map_err(|_| CryptoError)?;
     Ok(LessSafeKey::new(unbound))
 }
 
-/// Encrypts `plain` for `purpose` under a key derived from `token`: random nonce, then ciphertext and tag.
-pub(crate) fn seal(token: &str, purpose: Purpose, plain: &[u8]) -> Result<Vec<u8>, CryptoError> {
+/// Encrypts `plain` under a key derived from `token`: random nonce, then ciphertext and tag.
+pub(crate) fn seal(token: &str, plain: &[u8]) -> Result<Vec<u8>, CryptoError> {
     let mut nonce = [0u8; NONCE_LEN];
     SystemRandom::new()
         .fill(&mut nonce)
         .map_err(|_| CryptoError)?;
     let mut buf = plain.to_vec();
-    key(token, purpose)?
+    key(token)?
         .seal_in_place_append_tag(Nonce::assume_unique_for_key(nonce), Aad::empty(), &mut buf)
         .map_err(|_| CryptoError)?;
     let mut out = nonce.to_vec();
@@ -116,15 +98,15 @@ pub(crate) fn seal(token: &str, purpose: Purpose, plain: &[u8]) -> Result<Vec<u8
     Ok(out)
 }
 
-/// Decrypts what [`seal`] produced; `None` for a wrong token, purpose or a modified value.
-pub(crate) fn open(token: &str, purpose: Purpose, sealed: &[u8]) -> Option<Vec<u8>> {
+/// Decrypts what [`seal`] produced; `None` for a wrong token or a modified value.
+pub(crate) fn open(token: &str, sealed: &[u8]) -> Option<Vec<u8>> {
     if sealed.len() < NONCE_LEN {
         return None;
     }
     let (nonce, cipher) = sealed.split_at(NONCE_LEN);
     let nonce = Nonce::try_assume_unique_for_key(nonce).ok()?;
     let mut buf = cipher.to_vec();
-    let plain = key(token, purpose)
+    let plain = key(token)
         .ok()?
         .open_in_place(nonce, Aad::empty(), &mut buf)
         .ok()?;
@@ -187,22 +169,18 @@ mod tests {
     }
 
     #[test]
-    fn sealed_values_open_only_with_the_same_token_and_purpose() {
+    fn sealed_values_open_only_with_the_same_token() {
         let token = generate().unwrap();
-        let sealed = seal(&token, Purpose::IdToken, b"eyJ.id.token").unwrap();
-        assert!(!sealed.windows(5).any(|w| w == b"eyJ.i"), "not plain text");
-        assert_eq!(
-            open(&token, Purpose::IdToken, &sealed).unwrap(),
-            b"eyJ.id.token"
-        );
-        assert!(open(&token, Purpose::LoginState, &sealed).is_none());
-        assert!(open(&generate().unwrap(), Purpose::IdToken, &sealed).is_none());
+        let sealed = seal(&token, br#"{"pkce_verifier":"v"}"#).unwrap();
+        assert!(!sealed.windows(5).any(|w| w == b"pkce_"), "not plain text");
+        assert_eq!(open(&token, &sealed).unwrap(), br#"{"pkce_verifier":"v"}"#);
+        assert!(open(&generate().unwrap(), &sealed).is_none());
         let mut tampered = sealed.clone();
         let last = tampered.len() - 1;
         tampered[last] ^= 1;
-        assert!(open(&token, Purpose::IdToken, &tampered).is_none());
-        assert!(open(&token, Purpose::IdToken, &sealed[..5]).is_none());
-        let again = seal(&token, Purpose::IdToken, b"eyJ.id.token").unwrap();
+        assert!(open(&token, &tampered).is_none());
+        assert!(open(&token, &sealed[..5]).is_none());
+        let again = seal(&token, br#"{"pkce_verifier":"v"}"#).unwrap();
         assert_ne!(again, sealed, "fresh nonce each time");
     }
 }

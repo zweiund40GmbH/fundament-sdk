@@ -10,7 +10,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
-use z40_fundament_http::bff::{Bff, BffConfig, LoginDenied, Session, SessionStore};
+use z40_fundament_http::bff::{Bff, BffBuilder, BffConfig, LoginDenied, Session, SessionStore};
 
 /// The app's session data.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -48,6 +48,16 @@ impl TestApp {
 impl<S: SessionStore + Clone> TestApp<S> {
     /// Provider and app over `store`; `vars` overrides settings (`AUTH_…`).
     pub async fn with_store(store: S, vars: &[(&str, &str)]) -> Self {
+        Self::custom(store, vars, |b| b).await
+    }
+
+    /// Like [`TestApp::with_store`], with `customize` applied to the builder. The client address comes
+    /// from the header `x-test-ip` (none without it).
+    pub async fn custom(
+        store: S,
+        vars: &[(&str, &str)],
+        customize: impl FnOnce(BffBuilder<User>) -> BffBuilder<User>,
+    ) -> Self {
         let provider = Provider::start().await;
         let mut env: Vec<(String, String)> = vec![
             ("AUTH_ISSUER".into(), provider.issuer.clone()),
@@ -55,7 +65,7 @@ impl<S: SessionStore + Clone> TestApp<S> {
             ("AUTH_CLIENT_SECRET".into(), "s3cr3t".into()),
             (
                 "AUTH_REDIRECT_URI".into(),
-                "https://crm.example.com/auth/callback".into(),
+                "https://crm.example.com/api/auth/callback".into(),
             ),
             (
                 "AUTH_POST_LOGOUT_REDIRECT_URI".into(),
@@ -88,9 +98,11 @@ impl<S: SessionStore + Clone> TestApp<S> {
         })
         .cookie_name("crm")
         .scopes(&["profile", "email", "roles"])
-        .keep_id_token(true)
-        .build()
-        .unwrap();
+        .client_ip(|parts| {
+            let ip = parts.headers.get("x-test-ip")?.to_str().ok()?;
+            ip.parse().ok()
+        });
+        let bff = customize(bff).build().unwrap();
         let router = Router::new()
             .route("/api/me", get(me))
             .route("/api/maybe", get(maybe))
@@ -124,13 +136,13 @@ impl<S: SessionStore + Clone> TestApp<S> {
         self.router.clone().oneshot(req).await.unwrap()
     }
 
-    /// `GET /auth/login?returnTo=…`: the authorize URL and the login cookie (`name=value`).
+    /// `GET /api/auth/login?returnTo=…`: the authorize URL and the login cookie (`name=value`).
     pub async fn start_login(&self, return_to: &str) -> (String, String) {
         let q = url::form_urlencoded::Serializer::new(String::new())
             .append_pair("returnTo", return_to)
             .finish();
         let res = self
-            .send(Method::GET, &format!("/auth/login?{q}"), "", &[], "")
+            .send(Method::GET, &format!("/api/auth/login?{q}"), "", &[], "")
             .await;
         assert_eq!(res.status(), StatusCode::SEE_OTHER);
         let cookie = set_cookies(res.headers())
@@ -155,7 +167,7 @@ impl<S: SessionStore + Clone> TestApp<S> {
         let res = self
             .send(
                 Method::GET,
-                &format!("/auth/callback?{}", a.query),
+                &format!("/api/auth/callback?{}", a.query),
                 &cookies,
                 &[],
                 "",

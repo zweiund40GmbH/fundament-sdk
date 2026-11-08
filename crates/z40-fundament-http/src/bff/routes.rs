@@ -10,10 +10,10 @@
 use super::page::{LoginFailure, no_store};
 use super::return_to;
 use super::store::{PendingLogin, SessionRecord};
-use super::token::{self, Purpose, TokenHash};
-use super::{Bff, BffError, DATA_MAX, ID_TOKEN_MAX, SID_MAX, SUB_MAX, SessionData, cookies};
+use super::token::{self, TokenHash};
+use super::{Bff, BffError, DATA_MAX, SID_MAX, SUB_MAX, SessionData, cookies};
 use axum::Router;
-use axum::extract::State;
+use axum::extract::{Request, State};
 use axum::http::{HeaderMap, Uri};
 use axum::response::{IntoResponse, Redirect, Response};
 use axum::routing::{get, post};
@@ -40,13 +40,18 @@ impl<T: SessionData> Bff<T> {
     }
 
     /// The page of a failed login, with the login cookie cleared.
-    fn failure(&self, mut headers: HeaderMap, failure: LoginFailure) -> Response {
+    fn failure(&self, headers: HeaderMap, failure: LoginFailure) -> Response {
         let page = (self.inner.error_page)(&failure);
         let (mut parts, body) = page.into_parts();
-        parts
-            .headers
-            .extend(headers.drain().filter_map(|(k, v)| k.map(|k| (k, v))));
+        append_all(&mut parts.headers, headers);
         no_store(Response::from_parts(parts, body))
+    }
+}
+
+/// Appends every value of `from` to `to`, keeping values `to` already has (e.g. two `Set-Cookie`).
+fn append_all(to: &mut HeaderMap, from: HeaderMap) {
+    for (name, value) in &from {
+        to.append(name.clone(), value.clone());
     }
 }
 
@@ -60,9 +65,14 @@ fn return_to_param(uri: &Uri) -> Option<String> {
     values.next().is_none().then_some(first)
 }
 
-/// `GET <base>/login?returnTo=`: stores the login state and redirects to the provider.
-async fn login<T: SessionData>(State(bff): State<Bff<T>>, uri: Uri) -> Response {
-    match start(&bff, &uri).await {
+/// `GET <base>/login?returnTo=`: checks the login limit (`429` without writing anything), stores the
+/// login state and redirects to the provider.
+async fn login<T: SessionData>(State(bff): State<Bff<T>>, request: Request) -> Response {
+    let (parts, _) = request.into_parts();
+    if bff.inner.limit.as_ref().is_some_and(|l| !l.allow(&parts)) {
+        return bff.failure(HeaderMap::new(), LoginFailure::RateLimited);
+    }
+    match start(&bff, &parts.uri).await {
         Ok(res) => no_store(res),
         Err(failure) => bff.failure(HeaderMap::new(), failure),
     }
@@ -82,8 +92,7 @@ async fn start<T: SessionData>(bff: &Bff<T>, uri: &Uri) -> Result<Response, Logi
     let value = token::generate().map_err(|_| LoginFailure::Internal)?;
     let state = serde_json::to_vec(&request.state).map_err(|_| LoginFailure::Internal)?;
     let pending = PendingLogin {
-        state: token::seal(&value, Purpose::LoginState, &state)
-            .map_err(|_| LoginFailure::Internal)?,
+        state: token::seal(&value, &state).map_err(|_| LoginFailure::Internal)?,
         return_to: return_to::sanitize(return_to_param(uri).as_deref()),
         expires_at: Utc::now() + TimeDelta::seconds(LOGIN_TTL_SECS),
     };
@@ -156,7 +165,7 @@ async fn finish<T: SessionData>(
         .map_err(internal)?
         .filter(|p| Utc::now() < p.expires_at)
         .ok_or(LoginFailure::Expired)?;
-    let state: LoginState = token::open(&value, Purpose::LoginState, &pending.state)
+    let state: LoginState = token::open(&value, &pending.state)
         .and_then(|plain| serde_json::from_slice(&plain).ok())
         .ok_or(LoginFailure::Expired)?;
     let params = CallbackParams::from_query(uri.query().unwrap_or(""))
@@ -171,7 +180,6 @@ async fn finish<T: SessionData>(
         tracing::warn!("login rejected: sub or sid too long");
         return Err(LoginFailure::Rejected);
     }
-    let id_token = login.tokens.id_token.clone();
     let data = (i.on_login)(client, login)
         .await
         .map_err(LoginFailure::Denied)?;
@@ -187,18 +195,11 @@ async fn finish<T: SessionData>(
             .map_err(internal)?;
     }
     let new = token::generate().map_err(internal)?;
-    let id_token = match id_token.filter(|_| i.keep_id_token) {
-        Some(t) if t.expose_secret().len() <= ID_TOKEN_MAX => Some(
-            token::seal(&new, Purpose::IdToken, t.expose_secret().as_bytes()).map_err(internal)?,
-        ),
-        _ => None,
-    };
     let now = Utc::now();
     let record = SessionRecord {
         sub,
         sid,
         data,
-        id_token,
         created_at: now,
         last_seen_at: now,
         expires_at: i.config.timeouts.expires_at(now, now),
@@ -235,6 +236,19 @@ mod tests {
             return_to_param(&uri("/auth/login?x=1&returnTo=/a")).as_deref(),
             Some("/a")
         );
+    }
+
+    #[test]
+    fn all_header_values_are_kept() {
+        use axum::http::{HeaderValue, header::SET_COOKIE};
+        let mut to = HeaderMap::new();
+        to.append(SET_COOKIE, HeaderValue::from_static("page=1"));
+        let mut from = HeaderMap::new();
+        from.append(SET_COOKIE, HeaderValue::from_static("a=1"));
+        from.append(SET_COOKIE, HeaderValue::from_static("b=2"));
+        append_all(&mut to, from);
+        let all: Vec<_> = to.get_all(SET_COOKIE).iter().collect();
+        assert_eq!(all, ["page=1", "a=1", "b=2"]);
     }
 
     #[test]

@@ -12,10 +12,12 @@ use z40_fundament_http::csrf::Csrf;
 const FORM: (&str, &str) = ("content-type", "application/x-www-form-urlencoded");
 
 #[tokio::test]
-async fn logout_ends_the_session_and_sends_the_hint() {
+async fn logout_ends_the_session_without_a_token_in_the_url() {
     let app = TestApp::start(&[]).await;
     let s = app.login_as("u", Some("sid-1"), "").await;
-    let res = app.send(Method::POST, "/auth/logout", &s, &[], "").await;
+    let res = app
+        .send(Method::POST, "/api/auth/logout", &s, &[], "")
+        .await;
     assert_eq!(res.status(), StatusCode::OK);
     assert_eq!(res.headers()[header::CACHE_CONTROL], "no-store");
     let cleared = set_cookies(res.headers());
@@ -31,24 +33,80 @@ async fn logout_ends_the_session_and_sends_the_hint() {
     );
     let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
     assert_eq!(q["post_logout_redirect_uri"], "https://crm.example.com/");
-    assert_eq!(
-        q["id_token_hint"].split('.').count(),
-        3,
-        "the kept ID token"
-    );
+    assert_eq!(q["client_id"], "crm");
+    assert!(!q.contains_key("id_token_hint"), "no token in a URL");
     assert_eq!(app.store.session_count(), 0);
     let me = app.send(Method::GET, "/api/me", &s, &[], "").await;
     assert_eq!(me.status(), StatusCode::UNAUTHORIZED);
     // Without a session the logout still answers (and clears the cookie).
-    let res = app.send(Method::POST, "/auth/logout", "", &[], "").await;
+    let res = app
+        .send(Method::POST, "/api/auth/logout", "", &[], "")
+        .await;
     assert_eq!(res.status(), StatusCode::OK);
-    let body: serde_json::Value = serde_json::from_str(&text(res).await).unwrap();
-    assert!(
-        !body["logoutUrl"]
-            .as_str()
-            .unwrap()
-            .contains("id_token_hint")
+}
+
+#[tokio::test]
+async fn logout_started_by_another_site_is_refused() {
+    let app = TestApp::start(&[]).await;
+    let s = app.login_as("u", None, "").await;
+    for site in ["cross-site", "same-site", "none"] {
+        let res = app
+            .send(
+                Method::POST,
+                "/api/auth/logout",
+                &s,
+                &[("sec-fetch-site", site)],
+                "",
+            )
+            .await;
+        assert_eq!(res.status(), StatusCode::FORBIDDEN, "{site}");
+        assert!(text(res).await.contains("CSRF"));
+        assert_eq!(app.store.session_count(), 1, "not logged out ({site})");
+    }
+    let res = app
+        .send(
+            Method::POST,
+            "/api/auth/logout",
+            &s,
+            &[("sec-fetch-site", "same-origin")],
+            "",
+        )
+        .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(app.store.session_count(), 0);
+}
+
+#[tokio::test]
+async fn back_channel_logout_with_an_unknown_sid_ends_sessions_without_sid() {
+    let app = TestApp::start(&[]).await;
+    let plain = app.login_as("erin", None, "").await;
+    let other = app.login_as("erin", Some("sid-e2"), "").await;
+    let res = post(
+        &app,
+        app.provider.logout_token(Some("erin"), Some("sid-e1")),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(
+        status(&app, &plain).await,
+        StatusCode::UNAUTHORIZED,
+        "no sid: ended"
     );
+    assert_eq!(
+        status(&app, &other).await,
+        StatusCode::OK,
+        "other sid: kept"
+    );
+    // A matching sid ends only that session, never the ones without sid.
+    let plain = app.login_as("erin", None, "").await;
+    let res = post(
+        &app,
+        app.provider.logout_token(Some("erin"), Some("sid-e2")),
+    )
+    .await;
+    assert_eq!(res.status(), StatusCode::OK);
+    assert_eq!(status(&app, &other).await, StatusCode::UNAUTHORIZED);
+    assert_eq!(status(&app, &plain).await, StatusCode::OK);
 }
 
 #[tokio::test]
@@ -58,7 +116,7 @@ async fn logout_is_guarded_by_the_csrf_layer_and_back_channel_is_exempt() {
     let guarded = app.router.clone().layer(
         Csrf::header("x-requested-with", "crm")
             .unwrap()
-            .exempt_path("/auth/backchannel-logout"),
+            .exempt_path("/api/auth/backchannel-logout"),
     );
     let send = |headers: Vec<(&'static str, &'static str)>, uri: &'static str, body: String| {
         let mut b = axum::http::Request::builder().method(Method::POST).uri(uri);
@@ -69,13 +127,15 @@ async fn logout_is_guarded_by_the_csrf_layer_and_back_channel_is_exempt() {
         let req = b.body(axum::body::Body::from(body)).unwrap();
         tower::ServiceExt::oneshot(guarded.clone(), req)
     };
-    let res = send(vec![], "/auth/logout", String::new()).await.unwrap();
+    let res = send(vec![], "/api/auth/logout", String::new())
+        .await
+        .unwrap();
     assert_eq!(res.status(), StatusCode::FORBIDDEN);
     assert_eq!(app.store.session_count(), 1, "not logged out");
     let token = app.provider.logout_token(None, Some("sid-1"));
     let res = send(
         vec![FORM],
-        "/auth/backchannel-logout",
+        "/api/auth/backchannel-logout",
         format!("logout_token={token}"),
     )
     .await
@@ -87,8 +147,14 @@ async fn logout_is_guarded_by_the_csrf_layer_and_back_channel_is_exempt() {
 /// Posts `token` to the back-channel logout.
 async fn post(app: &TestApp, token: String) -> axum::response::Response {
     let body = format!("logout_token={token}");
-    app.send(Method::POST, "/auth/backchannel-logout", "", &[FORM], &body)
-        .await
+    app.send(
+        Method::POST,
+        "/api/auth/backchannel-logout",
+        "",
+        &[FORM],
+        &body,
+    )
+    .await
 }
 
 /// Status of `GET /api/me` with `cookie`.
@@ -134,7 +200,7 @@ async fn back_channel_logout_by_sid_and_by_sub() {
     let res = app
         .send(
             Method::POST,
-            "/auth/backchannel-logout",
+            "/api/auth/backchannel-logout",
             "",
             &[("content-type", "application/json")],
             "{}",

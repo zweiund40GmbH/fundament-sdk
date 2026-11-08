@@ -11,7 +11,6 @@ CREATE TABLE IF NOT EXISTS `bff_session` (
   `sub`          VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL COMMENT 'subject at the login provider',
   `sid`          VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NULL COMMENT 'session id of the login provider (back-channel logout)',
   `data`         TEXT NOT NULL COMMENT 'session data of the app (JSON)',
-  `id_token`     BLOB NULL COMMENT 'ID token sealed with a key derived from the cookie value (logout hint)',
   `created_at`   DATETIME(3) NOT NULL COMMENT 'login time',
   `last_seen_at` DATETIME(3) NOT NULL COMMENT 'last recorded use',
   `expires_at`   DATETIME(3) NOT NULL COMMENT 'end under the timeouts at the last write',

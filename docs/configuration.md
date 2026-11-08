@@ -76,9 +76,11 @@ Read with `BffConfig::from_lookup(prefix, lookup)`. Apps that already use `AUTH_
 | `<PREFIX>_ISSUER` | (unset) | Issuer of the login provider (`https://…`; `http://` only for loopback hosts), exactly as in its discovery document. Required. |
 | `<PREFIX>_CLIENT_ID` | (unset) | Client id of this app at the login provider. Required. |
 | `<PREFIX>_CLIENT_SECRET` | (unset) | Client secret of this app. Required. Secret. |
-| `<PREFIX>_REDIRECT_URI` | (unset) | Callback URL of this app (`https://app.example.com/auth/callback`), exactly as registered. Required. A plain-HTTP loopback URL (local development) turns off `Secure` and the `__Host-` prefix of the cookies. |
+| `<PREFIX>_REDIRECT_URI` | (unset) | Callback URL of this app (`https://app.example.com/api/auth/callback`), exactly as registered. Required. A plain-HTTP loopback URL (local development) turns off `Secure` and the `__Host-` prefix of the cookies. |
 | `<PREFIX>_POST_LOGOUT_REDIRECT_URI` | (unset) | Where the login provider sends the browser after the logout, exactly as registered. Unset: the provider's own page. |
 | `<PREFIX>_COOKIE_SAMESITE` | `strict` | `SameSite` of the session cookie: `strict` (links from other sites open the app without the session) or `lax`. The login cookie is always `lax`. |
 | `<PREFIX>_SESSION_IDLE_SECS` | `7200` | A session ends after this many seconds without a request, 60–86400 (cut to the absolute timeout). |
 | `<PREFIX>_SESSION_MAX_SECS` | `36000` | A session ends this many seconds after the login, however active, 300–2592000. Bounds how long roles taken at login stay in effect without a back-channel logout. |
+| `<PREFIX>_LOGIN_RATE_PER_IP` | `30` | Login starts per client address and minute, 1–10000 (more get `429`). Counted per process; IPv6 by /64. |
+| `<PREFIX>_LOGIN_RATE_TOTAL` | `300` | Login starts per minute from all clients together, 1–1000000. Bounds the rows written before anyone is authenticated. Counted per process. |
 <!-- END GENERATED (z40-fundament-http) -->

@@ -13,8 +13,11 @@ use url::{Host, Url};
 use z40_fundament::SecretString;
 use z40_fundament::config::{ConfigError, ConfigVar, Lookup};
 
-/// Settings of the login and the sessions. `Debug` redacts the client secret.
+/// Settings of the login and the sessions. `Debug` redacts the client secret. Built with
+/// [`BffConfig::from_lookup`] or [`BffConfig::new`]; the URLs are checked again when the
+/// [`super::Bff`] is built, so changing a field afterwards cannot slip past the rules.
 #[derive(Debug, Clone)]
+#[non_exhaustive]
 pub struct BffConfig {
     /// Issuer of the login provider, exactly as in its discovery document (a trailing `/` is removed).
     pub issuer: String,
@@ -31,12 +34,20 @@ pub struct BffConfig {
     pub same_site: SameSite,
     /// Idle and absolute timeout of sessions.
     pub timeouts: Timeouts,
+    /// Login starts per client address and minute.
+    pub login_rate_per_ip: u32,
+    /// Login starts per minute, all clients together.
+    pub login_rate_total: u32,
 }
 
 /// Default idle timeout (2 hours).
 const IDLE_DEFAULT: u64 = 7200;
 /// Default absolute timeout (10 hours, a working day).
 const ABSOLUTE_DEFAULT: u64 = 36_000;
+/// Default login starts per client address and minute.
+const RATE_PER_IP_DEFAULT: u64 = 30;
+/// Default login starts per minute in total.
+const RATE_TOTAL_DEFAULT: u64 = 300;
 
 impl BffConfig {
     /// The variables of [`BffConfig::from_lookup`].
@@ -60,7 +71,7 @@ impl BffConfig {
         ConfigVar {
             suffix: "REDIRECT_URI",
             default: None,
-            description: "Callback URL of this app (`https://app.example.com/auth/callback`), exactly as \
+            description: "Callback URL of this app (`https://app.example.com/api/auth/callback`), exactly as \
                           registered. Required. A plain-HTTP loopback URL (local development) turns off \
                           `Secure` and the `__Host-` prefix of the cookies.",
         },
@@ -89,7 +100,61 @@ impl BffConfig {
                           300–2592000. Bounds how long roles taken at login stay in effect without a \
                           back-channel logout.",
         },
+        ConfigVar {
+            suffix: "LOGIN_RATE_PER_IP",
+            default: Some("30"),
+            description: "Login starts per client address and minute, 1–10000 (more get `429`). Counted \
+                          per process; IPv6 by /64.",
+        },
+        ConfigVar {
+            suffix: "LOGIN_RATE_TOTAL",
+            default: Some("300"),
+            description: "Login starts per minute from all clients together, 1–1000000. Bounds the rows \
+                          written before anyone is authenticated. Counted per process.",
+        },
     ];
+
+    /// Settings with the defaults of [`BffConfig::VARIABLES`] for the remaining fields. The URLs follow
+    /// the rules of the module docs (a trailing `/` of the issuer is removed).
+    pub fn new(
+        issuer: &str,
+        client_id: &str,
+        client_secret: SecretString,
+        redirect_uri: &str,
+    ) -> Result<Self, InvalidUrl> {
+        check_url(issuer).map_err(|_| InvalidUrl("issuer"))?;
+        check_url(redirect_uri).map_err(|_| InvalidUrl("redirect_uri"))?;
+        Ok(Self {
+            issuer: issuer.strip_suffix('/').unwrap_or(issuer).to_owned(),
+            client_id: client_id.to_owned(),
+            client_secret,
+            redirect_uri: redirect_uri.to_owned(),
+            post_logout_redirect_uri: None,
+            same_site: SameSite::Strict,
+            timeouts: Timeouts::from_secs(IDLE_DEFAULT as u32, ABSOLUTE_DEFAULT as u32),
+            login_rate_per_ip: RATE_PER_IP_DEFAULT as u32,
+            login_rate_total: RATE_TOTAL_DEFAULT as u32,
+        })
+    }
+
+    /// Checks the URLs (issuer, redirect URI, post-logout redirect URI) against the rules of the module
+    /// docs; the error names the field.
+    pub fn check(&self) -> Result<(), InvalidUrl> {
+        let urls = [
+            ("issuer", Some(self.issuer.as_str())),
+            ("redirect_uri", Some(self.redirect_uri.as_str())),
+            (
+                "post_logout_redirect_uri",
+                self.post_logout_redirect_uri.as_deref(),
+            ),
+        ];
+        for (field, url) in urls {
+            if url.is_some_and(|u| check_url(u).is_err()) {
+                return Err(InvalidUrl(field));
+            }
+        }
+        Ok(())
+    }
 
     /// Reads the variables of [`BffConfig::VARIABLES`] with `prefix`.
     pub fn from_lookup(
@@ -119,6 +184,8 @@ impl BffConfig {
         };
         let idle = l.number("SESSION_IDLE_SECS", IDLE_DEFAULT, 60..=86_400)?;
         let absolute = l.number("SESSION_MAX_SECS", ABSOLUTE_DEFAULT, 300..=2_592_000)?;
+        let per_ip = l.number("LOGIN_RATE_PER_IP", RATE_PER_IP_DEFAULT, 1..=10_000)?;
+        let total = l.number("LOGIN_RATE_TOTAL", RATE_TOTAL_DEFAULT, 1..=1_000_000)?;
         Ok(Self {
             issuer,
             client_id: required("CLIENT_ID")?,
@@ -126,8 +193,10 @@ impl BffConfig {
             redirect_uri,
             post_logout_redirect_uri,
             same_site,
-            // Both ranges fit in u32.
+            // All ranges fit in u32.
             timeouts: Timeouts::from_secs(idle as u32, absolute as u32),
+            login_rate_per_ip: per_ip as u32,
+            login_rate_total: total as u32,
         })
     }
 
@@ -137,6 +206,11 @@ impl BffConfig {
         Url::parse(&self.redirect_uri).map_or(true, |u| u.scheme() != "http")
     }
 }
+
+/// A URL of the configuration breaks the rules of the module docs; names the field, never the value.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+#[error("invalid URL in {0} (https://, http:// only for loopback hosts, no user info or fragment)")]
+pub struct InvalidUrl(pub &'static str);
 
 /// The error kind of a bad URL.
 fn url_kind() -> z40_fundament::config::ConfigErrorKind {
@@ -163,113 +237,5 @@ pub(crate) fn check_url(raw: &str) -> Result<(), &'static str> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use z40_fundament::config::ConfigErrorKind;
-
-    fn env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
-        let pairs: Vec<(String, String)> = pairs
-            .iter()
-            .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
-            .collect();
-        move |name| {
-            pairs
-                .iter()
-                .find(|(k, _)| k == name)
-                .map(|(_, v)| v.clone())
-        }
-    }
-
-    const BASE: [(&str, &str); 4] = [
-        ("AUTH_ISSUER", "https://login.example.com/"),
-        ("AUTH_CLIENT_ID", "crm"),
-        ("AUTH_CLIENT_SECRET", "s3cr3t"),
-        ("AUTH_REDIRECT_URI", "https://crm.example.com/auth/callback"),
-    ];
-
-    fn with(extra: &[(&str, &str)]) -> Result<BffConfig, ConfigError> {
-        let mut all: Vec<(&str, &str)> = BASE.to_vec();
-        all.retain(|(k, _)| !extra.iter().any(|(e, _)| e == k));
-        all.extend_from_slice(extra);
-        BffConfig::from_lookup("AUTH", env(&all))
-    }
-
-    #[test]
-    fn defaults_and_redacted_secret() {
-        let c = with(&[]).unwrap();
-        assert_eq!(c.issuer, "https://login.example.com");
-        assert_eq!(c.client_secret.expose(), "s3cr3t");
-        assert_eq!(c.same_site, SameSite::Strict);
-        assert_eq!(c.timeouts, Timeouts::from_secs(7200, 36_000));
-        assert_eq!(c.post_logout_redirect_uri, None);
-        assert!(c.secure_cookies());
-        assert!(!format!("{c:?}").contains("s3cr3t"));
-    }
-
-    #[test]
-    fn optional_settings() {
-        let c = with(&[
-            ("AUTH_POST_LOGOUT_REDIRECT_URI", "https://crm.example.com/"),
-            ("AUTH_COOKIE_SAMESITE", "lax"),
-            ("AUTH_SESSION_IDLE_SECS", "900"),
-            ("AUTH_SESSION_MAX_SECS", "3600"),
-        ])
-        .unwrap();
-        assert_eq!(
-            c.post_logout_redirect_uri.as_deref(),
-            Some("https://crm.example.com/")
-        );
-        assert_eq!(c.same_site, SameSite::Lax);
-        assert_eq!(c.timeouts, Timeouts::from_secs(900, 3600));
-    }
-
-    #[test]
-    fn required_values_and_bad_values_are_refused() {
-        for missing in [
-            "AUTH_ISSUER",
-            "AUTH_CLIENT_ID",
-            "AUTH_CLIENT_SECRET",
-            "AUTH_REDIRECT_URI",
-        ] {
-            let err = with(&[(missing, " ")]).unwrap_err();
-            assert_eq!(err.name, missing);
-        }
-        let err = with(&[("AUTH_COOKIE_SAMESITE", "none")]).unwrap_err();
-        assert_eq!(err.name, "AUTH_COOKIE_SAMESITE");
-        let err = with(&[("AUTH_SESSION_IDLE_SECS", "5")]).unwrap_err();
-        assert!(matches!(err.kind, ConfigErrorKind::OutOfRange { .. }));
-        let err = with(&[("AUTH_REDIRECT_URI", "http://crm.example.com/cb?k=s3cr3t")]).unwrap_err();
-        assert_eq!(err.kind, ConfigErrorKind::InvalidUrl);
-        assert!(!err.to_string().contains("s3cr3t"), "value never echoed");
-    }
-
-    #[test]
-    fn plain_http_only_on_loopback_and_then_without_secure_cookies() {
-        let c = with(&[
-            ("AUTH_ISSUER", "http://127.0.0.1:8400"),
-            ("AUTH_REDIRECT_URI", "http://localhost:3000/auth/callback"),
-        ])
-        .unwrap();
-        assert!(!c.secure_cookies());
-        for ok in [
-            "https://a.example",
-            "http://localhost:1/x",
-            "http://[::1]/",
-            "http://127.0.0.2/",
-        ] {
-            assert_eq!(check_url(ok), Ok(()), "{ok}");
-        }
-        for bad in [
-            "http://a.example/",
-            "http://localhost.example.com/",
-            "https://user:pw@a.example/",
-            "https://a.example/#x",
-            "ftp://localhost/",
-            "javascript:alert(1)",
-            "/relative",
-            "https://",
-        ] {
-            assert!(check_url(bad).is_err(), "{bad}");
-        }
-    }
-}
+#[path = "config_tests.rs"]
+mod tests;

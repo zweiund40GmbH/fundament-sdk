@@ -12,18 +12,30 @@
 //! * [`BffConfig`] – `from_lookup` settings, [`return_to`], [`cookies`], [`Timeouts`]
 //!
 //! **What is stored.** Only the SHA-256 of the session and login cookie values, never the values. The
-//! login state (PKCE verifier, nonce) and, if the app keeps it, the ID token (for the logout hint) are
-//! sealed with AES-256-GCM under a key derived from the cookie value: a copy of the store reveals
-//! neither. No access or refresh token is kept. The session holds `sub`, `sid` and what the app's login
-//! hook returns (JSON of the app's type `T`, e.g. name, e-mail and roles).
+//! login state (PKCE verifier, nonce) is sealed with AES-256-GCM under a key derived from the login
+//! cookie value: a copy of the store does not reveal it. No ID, access or refresh token is kept, so the
+//! logout URL carries no `id_token_hint` (the provider may ask to confirm). The session holds `sub`,
+//! `sid` and what the app's login hook returns (JSON of the app's type `T`, e.g. name, e-mail, roles).
 //!
 //! **Rotation.** Every login creates a new random session id (256 bit) and deletes the session of the
 //! cookie the browser brought along, so an id planted before the login is never signed in.
 //!
-//! **CSRF and limits.** `POST <base>/logout` must be covered by the app's [`crate::csrf::Csrf`] layer;
-//! `POST <base>/backchannel-logout` is a server-to-server call without cookies and must be exempt. Each
-//! `GET <base>/login` writes a row to the store without authentication: rate-limit it in the app
-//! (e.g. a `route_layer` keyed on [`crate::client_ip::ClientIp`]) and run the store's cleanup.
+//! **CSRF.** `POST <base>/logout` must be covered by the app's [`crate::csrf::Csrf`] layer (the default
+//! base `/api/auth` lies under `/api/`); as a second line it refuses a request whose `Sec-Fetch-Site` is
+//! present and not `same-origin`. `POST <base>/backchannel-logout` is a server-to-server call without
+//! cookies and must be exempt.
+//!
+//! **Login limit.** Each `GET <base>/login` writes a row before anyone is authenticated, so starts are
+//! limited per client address and in total (`<PREFIX>_LOGIN_RATE_PER_IP`, `<PREFIX>_LOGIN_RATE_TOTAL`,
+//! default 30 and 300 per minute, counted per process); more get `429` and write nothing. Behind a
+//! reverse proxy pass `TrustedProxies::resolver()` to [`BffBuilder::client_ip`]. Run the store's cleanup
+//! for logins that never came back.
+//!
+//! **Back-channel logout** ends the sessions of the token's `sid`; if none has it, the sessions of its
+//! `sub` without `sid`; a token without `sid` ends all sessions of `sub`. A logout that arrives while a
+//! callback of the same login is between its token exchange and storing the session (milliseconds) finds
+//! nothing to end, and that session stays until its timeouts; the provider has ended its own session, so
+//! the next login there starts afresh.
 //!
 //! ```no_run
 //! use axum::{Json, Router, routing::get};
@@ -66,6 +78,7 @@
 mod builder;
 pub mod config;
 pub mod cookies;
+mod limit;
 mod logout;
 mod page;
 pub mod return_to;
@@ -76,8 +89,9 @@ pub mod timeouts;
 pub mod token;
 
 pub use builder::BffBuilder;
-pub use config::BffConfig;
+pub use config::{BffConfig, InvalidUrl};
 pub use cookies::SameSite;
+pub use limit::ClientIpFn;
 pub use page::{LoginDenied, LoginFailure};
 pub use session::{Session, SessionRejection};
 pub use store::{PendingLogin, SessionRecord, SessionStore};
@@ -139,6 +153,12 @@ pub enum BffBuildError {
     /// A scope is empty or contains characters outside visible ASCII (or `"`, `\`).
     #[error("invalid scope")]
     Scope,
+    /// A URL of the configuration breaks the rules of [`config`].
+    #[error(transparent)]
+    Url(#[from] InvalidUrl),
+    /// A login limit of 0.
+    #[error("login limit must be at least 1")]
+    LoginLimit,
 }
 
 /// Longest accepted `sub` (and the `sub` column of `bff-mysql`).
@@ -147,8 +167,6 @@ pub const SUB_MAX: usize = 255;
 pub const SID_MAX: usize = 255;
 /// Largest session data (JSON bytes).
 pub const DATA_MAX: usize = 16 * 1024;
-/// Largest kept ID token (bytes).
-pub const ID_TOKEN_MAX: usize = 8 * 1024;
 
 /// Login and sessions of an app; cheap to clone (put it in the app state and provide it via
 /// `FromRef` for [`Session`]). `T` is the app's session data.
@@ -182,11 +200,11 @@ struct Inner<T> {
     cookies: Cookies,
     base: String,
     scopes: Vec<String>,
-    keep_id_token: bool,
     on_login: LoginHook<T>,
     error_page: ErrorPage,
     options: Options,
     client: OnceCell<Arc<Client>>,
+    limit: Option<limit::LoginLimit>,
 }
 
 impl<T: SessionData> Bff<T> {

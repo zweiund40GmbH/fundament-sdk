@@ -28,7 +28,7 @@ async fn login_round_trip_sets_a_strict_host_cookie_and_returns() {
     let res = app
         .send(
             Method::GET,
-            &format!("/auth/callback?{}", a.query),
+            &format!("/api/auth/callback?{}", a.query),
             &login_cookie,
             &[],
             "",
@@ -94,7 +94,7 @@ async fn login_cookie_attributes_and_hostile_return_to() {
         let res = app
             .send(
                 Method::GET,
-                &format!("/auth/callback?{}", a.query),
+                &format!("/api/auth/callback?{}", a.query),
                 &login_cookie,
                 &[],
                 "",
@@ -102,7 +102,7 @@ async fn login_cookie_attributes_and_hostile_return_to() {
             .await;
         assert_eq!(location(&res), back, "{asked}");
     }
-    let res = app.send(Method::GET, "/auth/login", "", &[], "").await;
+    let res = app.send(Method::GET, "/api/auth/login", "", &[], "").await;
     let login = set_cookies(res.headers()).pop().unwrap();
     assert!(
         login.ends_with("; Path=/; Max-Age=600; SameSite=Lax; HttpOnly; Secure"),
@@ -135,7 +135,7 @@ async fn state_mismatch_is_rejected_and_the_login_is_used_up() {
     let res = app
         .send(
             Method::GET,
-            &format!("/auth/callback?{forged}"),
+            &format!("/api/auth/callback?{forged}"),
             &login_cookie,
             &[],
             "",
@@ -148,7 +148,7 @@ async fn state_mismatch_is_rejected_and_the_login_is_used_up() {
     let res = app
         .send(
             Method::GET,
-            &format!("/auth/callback?{}", a.query),
+            &format!("/api/auth/callback?{}", a.query),
             &login_cookie,
             &[],
             "",
@@ -171,7 +171,7 @@ async fn nonce_mismatch_is_rejected() {
     let res = app
         .send(
             Method::GET,
-            &format!("/auth/callback?{}", a.query),
+            &format!("/api/auth/callback?{}", a.query),
             &login_cookie,
             &[],
             "",
@@ -189,7 +189,7 @@ async fn callback_without_or_with_a_foreign_login_cookie_is_expired() {
     let a = app
         .provider
         .authorize(&authorize, "u", None, &["admin"], |_| {});
-    let uri = format!("/auth/callback?{}", a.query);
+    let uri = format!("/api/auth/callback?{}", a.query);
     for cookies in [
         "",
         "__Host-crm_login=garbage",
@@ -215,7 +215,7 @@ async fn callback_without_or_with_a_foreign_login_cookie_is_expired() {
     let res = app
         .send(
             Method::GET,
-            &format!("/auth/callback?{}", a.query),
+            &format!("/api/auth/callback?{}", a.query),
             &login_cookie,
             &[],
             "",
@@ -232,7 +232,7 @@ async fn hook_refusal_shows_its_text_and_creates_no_session() {
     let res = app
         .send(
             Method::GET,
-            &format!("/auth/callback?{}", a.query),
+            &format!("/api/auth/callback?{}", a.query),
             &login_cookie,
             &[],
             "",

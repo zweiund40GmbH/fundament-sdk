@@ -2,14 +2,17 @@
 //! [`BffBuilder::build`].
 
 use super::cookies::Cookies;
+use super::limit::{self, ClientIpFn, LoginLimit};
 use super::page;
 use super::store::DynStore;
 use super::{
     Bff, BffBuildError, BffConfig, ErrorPage, Inner, LoginDenied, LoginFailure, LoginHook,
     SessionData, SessionStore,
 };
+use axum::http::request::Parts;
 use axum::response::Response;
 use std::future::Future;
+use std::net::IpAddr;
 use std::sync::Arc;
 use tokio::sync::OnceCell;
 use z40_auth::{Client, LoginResult, Options};
@@ -22,9 +25,10 @@ pub struct BffBuilder<T> {
     cookie_name: String,
     base: String,
     scopes: Vec<String>,
-    keep_id_token: bool,
     error_page: ErrorPage,
     options: Options,
+    limit: Option<(u32, u32)>,
+    client_ip: ClientIpFn,
 }
 
 impl<T> std::fmt::Debug for BffBuilder<T> {
@@ -47,14 +51,16 @@ impl<T: SessionData> Bff<T> {
         F: Fn(Arc<Client>, LoginResult) -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Result<T, LoginDenied>> + Send + 'static,
     {
+        let limit = Some((config.login_rate_per_ip, config.login_rate_total));
         BffBuilder {
             config,
             store: Box::new(store),
             on_login: Arc::new(move |c, l| Box::pin(on_login(c, l))),
             cookie_name: "app".to_owned(),
-            base: "/auth".to_owned(),
+            base: "/api/auth".to_owned(),
             scopes: vec!["profile".to_owned(), "email".to_owned()],
-            keep_id_token: false,
+            limit,
+            client_ip: limit::connect_info(),
             error_page: Arc::new(page::default_page),
             options: Options::default(),
         }
@@ -68,7 +74,7 @@ impl<T: SessionData> BffBuilder<T> {
         self
     }
 
-    /// Path prefix of the routes (default `/auth`): `<base>/login`, `<base>/callback`, … . The redirect
+    /// Path prefix of the routes (default `/api/auth`, so a `Csrf` layer on `/api/` covers the logout): `<base>/login`, `<base>/callback`, … . The redirect
     /// URI of the configuration must end in `<base>/callback` as the browser sees it.
     pub fn base_path(mut self, base: &str) -> Self {
         base.clone_into(&mut self.base);
@@ -82,10 +88,28 @@ impl<T: SessionData> BffBuilder<T> {
         self
     }
 
-    /// Keeps the ID token (sealed, see the module docs) to send it as `id_token_hint` at the logout, so
-    /// the provider logs out without asking (default: off; then the provider may ask to confirm).
-    pub fn keep_id_token(mut self, keep: bool) -> Self {
-        self.keep_id_token = keep;
+    /// Limits login starts to `per_ip` per client address and `total` in all per minute (default: from
+    /// the configuration, 30 and 300). Both at least 1.
+    pub fn login_limit(mut self, per_ip: u32, total: u32) -> Self {
+        self.limit = Some((per_ip, total));
+        self
+    }
+
+    /// Turns the login limit off, e.g. when the app limits `GET <base>/login` itself (with shared
+    /// counters across instances).
+    pub fn without_login_limit(mut self) -> Self {
+        self.limit = None;
+        self
+    }
+
+    /// How the login limit finds the client address (default: the TCP peer from
+    /// `ConnectInfo<SocketAddr>`). Behind a reverse proxy pass `TrustedProxies::resolver()`. Without an
+    /// address all clients share one counter (warned once).
+    pub fn client_ip(
+        mut self,
+        resolve: impl Fn(&Parts) -> Option<IpAddr> + Send + Sync + 'static,
+    ) -> Self {
+        self.client_ip = Arc::new(resolve);
         self
     }
 
@@ -107,6 +131,7 @@ impl<T: SessionData> BffBuilder<T> {
 
     /// Checks the settings and builds the [`Bff`].
     pub fn build(self) -> Result<Bff<T>, BffBuildError> {
+        self.config.check()?;
         let cookies = Cookies::new(
             &self.cookie_name,
             self.config.same_site,
@@ -123,6 +148,13 @@ impl<T: SessionData> BffBuilder<T> {
         if !self.scopes.iter().all(scope_ok) {
             return Err(BffBuildError::Scope);
         }
+        let limit = match self.limit {
+            Some((per_ip, total)) if per_ip == 0 || total == 0 => {
+                return Err(BffBuildError::LoginLimit);
+            }
+            Some((per_ip, total)) => Some(LoginLimit::new(per_ip, total, self.client_ip)),
+            None => None,
+        };
         Ok(Bff {
             inner: Arc::new(Inner {
                 config: self.config,
@@ -130,11 +162,11 @@ impl<T: SessionData> BffBuilder<T> {
                 cookies,
                 base: self.base,
                 scopes: self.scopes,
-                keep_id_token: self.keep_id_token,
                 on_login: self.on_login,
                 error_page: self.error_page,
                 options: self.options,
                 client: OnceCell::new(),
+                limit,
             }),
         })
     }

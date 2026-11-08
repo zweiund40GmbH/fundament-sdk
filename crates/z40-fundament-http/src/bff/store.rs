@@ -11,8 +11,7 @@ use std::future::Future;
 use std::pin::Pin;
 use z40_fundament::StoreError;
 
-/// A session as stored. `Debug` shows only the times (`sub`, `data` and the sealed ID token are
-/// personal data or secrets).
+/// A session as stored. `Debug` shows only the times (`sub` and `data` are personal data).
 #[derive(Clone, PartialEq, Eq)]
 pub struct SessionRecord {
     /// Subject at the login provider.
@@ -21,9 +20,6 @@ pub struct SessionRecord {
     pub sid: Option<String>,
     /// The app's session data as JSON (what its login hook returned).
     pub data: String,
-    /// The ID token, sealed with a key derived from the session cookie (logout hint); only if the app
-    /// keeps it.
-    pub id_token: Option<Vec<u8>>,
     /// Login time.
     pub created_at: DateTime<Utc>,
     /// Last recorded use.
@@ -97,6 +93,13 @@ pub trait SessionStore: Send + Sync + 'static {
     /// Deletes all sessions of subject `sub`; returns the count.
     fn delete_by_sub(&self, sub: &str) -> impl Future<Output = Result<u64, StoreError>> + Send;
 
+    /// Deletes the sessions of subject `sub` that have no `sid`; returns the count. Used when a logout
+    /// token names a `sid` no session carries.
+    fn delete_by_sub_without_sid(
+        &self,
+        sub: &str,
+    ) -> impl Future<Output = Result<u64, StoreError>> + Send;
+
     /// Stores a started login under `id`.
     fn put_login(
         &self,
@@ -128,6 +131,7 @@ pub(crate) trait DynStore: Send + Sync {
     fn delete<'a>(&'a self, id: &'a TokenHash) -> BoxFuture<'a, bool>;
     fn delete_by_sid<'a>(&'a self, sid: &'a str) -> BoxFuture<'a, u64>;
     fn delete_by_sub<'a>(&'a self, sub: &'a str) -> BoxFuture<'a, u64>;
+    fn delete_by_sub_without_sid<'a>(&'a self, sub: &'a str) -> BoxFuture<'a, u64>;
     fn put_login<'a>(&'a self, id: &'a TokenHash, l: &'a PendingLogin) -> BoxFuture<'a, ()>;
     fn take_login<'a>(&'a self, id: &'a TokenHash) -> BoxFuture<'a, Option<PendingLogin>>;
 }
@@ -155,6 +159,9 @@ impl<S: SessionStore> DynStore for S {
     }
     fn delete_by_sub<'a>(&'a self, sub: &'a str) -> BoxFuture<'a, u64> {
         Box::pin(SessionStore::delete_by_sub(self, sub))
+    }
+    fn delete_by_sub_without_sid<'a>(&'a self, sub: &'a str) -> BoxFuture<'a, u64> {
+        Box::pin(SessionStore::delete_by_sub_without_sid(self, sub))
     }
     fn put_login<'a>(&'a self, id: &'a TokenHash, l: &'a PendingLogin) -> BoxFuture<'a, ()> {
         Box::pin(SessionStore::put_login(self, id, l))
