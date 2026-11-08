@@ -6,6 +6,28 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- `z40-fundament-http`, feature `bff`: login and sessions for backend-for-frontend apps with `z40-auth` 0.5.
+  - `Bff::builder(config, store, on_login)` with `cookie_name`, `base_path`, `scopes`, `keep_id_token`,
+    `auth_options`, `error_page`; `Bff::router()` serves `GET <base>/login?returnTo=`, `GET <base>/callback`,
+    `POST <base>/logout` (answers `{"logoutUrl"}`, `id_token_hint` if kept) and
+    `POST <base>/backchannel-logout` (ends the sessions of `sid`, else of `sub`).
+  - The login hook turns the verified login into the app's session data `T` (stored as JSON) or refuses it
+    with `LoginDenied`.
+  - `Session<T>` extractor (`401 UNAUTHENTICATED`) and `Option<Session<T>>`, `Bff::session(&headers)`,
+    `Bff::end_sessions_of(sub)`.
+  - `SessionStore` trait; only SHA-256 hashes of cookie values are stored, the login state and the optional
+    ID token are sealed with AES-256-GCM under a key derived from the cookie value.
+  - Cookies `__Host-<name>_sid` (`SameSite=Strict` or `Lax`) and `__Host-<name>_login` (`Lax`, 10 minutes,
+    single use); a new session id on every login.
+  - Idle and absolute timeout; `return_to::sanitize` accepts only same-origin paths.
+  - `BffConfig::from_lookup(prefix, lookup)`: `<PREFIX>_ISSUER`, `_CLIENT_ID`, `_CLIENT_SECRET`,
+    `_REDIRECT_URI`, `_POST_LOGOUT_REDIRECT_URI`, `_COOKIE_SAMESITE`, `_SESSION_IDLE_SECS`,
+    `_SESSION_MAX_SECS`.
+- `z40-fundament-http`, feature `bff-mysql`: `MySqlSessionStore` with `SessionTables` (prefix or own names),
+  `schema/mysql-session.sql` and `delete_expired(now)`.
+
 ## [0.4.0] - 2026-11-04
 
 ### Added

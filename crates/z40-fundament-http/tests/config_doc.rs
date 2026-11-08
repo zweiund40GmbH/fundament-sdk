@@ -2,7 +2,7 @@
 //! source of truth). Run `just config-doc` (sets `UPDATE_CONFIG_DOC=1`) to rewrite it.
 
 // The reference covers every feature with settings; compare only when they are enabled.
-#![cfg(feature = "telemetry")]
+#![cfg(all(feature = "telemetry", feature = "bff"))]
 
 const BEGIN: &str = "<!-- BEGIN GENERATED: just config-doc (z40-fundament-http) -->\n";
 const END: &str = "<!-- END GENERATED (z40-fundament-http) -->";

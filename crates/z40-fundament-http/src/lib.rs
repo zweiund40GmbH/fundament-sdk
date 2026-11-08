@@ -1,6 +1,6 @@
 //! HTTP groundwork for axum apps, the parts every app otherwise copies: request ids, a trace layer that
 //! never logs secrets, the global log setup, security headers, `no-store`, the client address behind
-//! trusted proxies and a CSRF header guard.
+//! trusted proxies, a CSRF header guard and the server-side OIDC login with sessions.
 //!
 //! Configuration uses the `from_lookup` helpers of [`z40_fundament::config`] (one system for both
 //! crates); `docs/configuration.md` in the repository lists the variables.
@@ -22,6 +22,9 @@
 //!   UUID v7, echo it
 //! * `trace` → [`trace`] – the trace layer (method, route template, request id, status, latency)
 //! * `telemetry` → [`telemetry`] – JSON or one-line text logs from `<PREFIX>_LOG` / `<PREFIX>_LOG_FORMAT`
+//! * `bff` → [`bff`] – login and sessions for backend-for-frontend apps: OIDC login with `z40-auth`,
+//!   session cookie, [`bff::Session`] extractor, logout and back-channel logout
+//! * `bff-mysql` → [`bff_mysql`] – MariaDB/MySQL session store
 //!
 //! The layers are made for axum's `Router::layer`. A typical order (the last `layer` call runs first):
 //!
@@ -45,6 +48,12 @@
 //! ```
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
+#[cfg(feature = "bff")]
+#[cfg_attr(docsrs, doc(cfg(feature = "bff")))]
+pub mod bff;
+#[cfg(feature = "bff-mysql")]
+#[cfg_attr(docsrs, doc(cfg(feature = "bff-mysql")))]
+pub mod bff_mysql;
 pub mod client_ip;
 pub mod config;
 pub mod csrf;

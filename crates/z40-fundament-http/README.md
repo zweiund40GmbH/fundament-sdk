@@ -6,7 +6,8 @@
 
 HTTP groundwork for [axum](https://crates.io/crates/axum) 0.8 apps – the parts every app otherwise copies:
 request ids, a trace layer that never logs secrets, the global log setup, security headers, `no-store`, the
-client address behind trusted proxies and a CSRF header guard. Part of
+client address behind trusted proxies, a CSRF header guard and the server-side OIDC login with sessions for
+backend-for-frontend apps. Part of
 [fundament-sdk](https://github.com/zweiund40GmbH/fundament-sdk); settings are read with the `from_lookup`
 helpers of [`z40-fundament`](https://crates.io/crates/z40-fundament).
 
@@ -19,6 +20,8 @@ helpers of [`z40-fundament`](https://crates.io/crates/z40-fundament).
 | *(none)* | `SecurityHeaders` (CSP checked: no unsafe script sources (`'unsafe-inline'`, `'unsafe-eval'`, `'unsafe-hashes'`, `*`, bare schemes), `frame-ancestors` required and not open; `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-*`; no HSTS), `NoStore`, `TrustedProxies` / `ClientIp` (`X-Forwarded-For` only from trusted proxies), `Csrf` (custom header on state-changing requests, exempt paths) |
 | `request-id` | `RequestIdLayer`: keeps a safe incoming `X-Request-Id` (≤ 64 of `[A-Za-z0-9._:-]`) or creates a UUID v7, echoes it, `RequestId` extension |
 | `trace` | `trace::layer()`: span with method, route template (`<unmatched>` for unknown routes, raw path only on opt-in) and request id; status and latency at the end; never query strings, headers or bodies |
+| `bff` | Login and sessions for backend-for-frontend apps with [`z40-auth`](https://crates.io/crates/z40-auth): `Bff::router()` (`GET <base>/login?returnTo=`, `GET <base>/callback`, `POST <base>/logout`, `POST <base>/backchannel-logout`), `Session<T>` extractor, `SessionStore` trait, `BffConfig` (`<PREFIX>_ISSUER`, `<PREFIX>_CLIENT_ID`, …) |
+| `bff-mysql` | `MySqlSessionStore` (MariaDB/MySQL, sqlx) with table prefix, `schema/mysql-session.sql` and `delete_expired` for the worker |
 | `telemetry` | `TelemetryConfig`: JSON lines or one-line text, `EnvFilter`, from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info`) and `<PREFIX>_LOG_FORMAT` (`json` \| `text`); `init` reports what it did (installed, installed without `log` bridge, already installed) |
 
 ## Quick start
@@ -60,6 +63,75 @@ axum::serve(listener, app.into_make_service_with_connect_info::<std::net::Socket
 - **CSP per route group:** headers are only added when missing. A route that sets its own CSP keeps it (`X-Frame-Options` then follows its `frame-ancestors`); a
   router group gets its own `SecurityHeaders` layer before it is merged.
 - **HSTS** is the job of the edge proxy that terminates TLS.
+
+## Login and sessions (`bff`)
+
+The browser never holds a token of the login provider: the server runs the login (Authorization Code with
+PKCE S256, `state`, `nonce`, RFC 9207 `iss`, all checked by `z40-auth`) and gives the browser a random
+session cookie.
+
+```toml
+[dependencies]
+z40-fundament-http = { version = "0.5", features = ["bff-mysql"] }
+```
+
+```rust,ignore
+use z40_fundament_http::bff::{Bff, BffConfig, LoginDenied, Session};
+use z40_fundament_http::bff_mysql::{MySqlSessionStore, SessionTables};
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct User { name: String, roles: Vec<String> }
+
+let config = BffConfig::from_lookup("AUTH", env)?;          // AUTH_ISSUER, AUTH_CLIENT_ID, AUTH_CLIENT_SECRET, …
+let store = MySqlSessionStore::new(pool, SessionTables::with_prefix("crm_")?);
+let bff = Bff::builder(config, store.clone(), |client, login| async move {
+    // Runs after the login was verified: pick what the session keeps, or refuse.
+    let access = client
+        .verify_access_token(login.tokens.access_token.expose_secret(), client.client_id())
+        .await
+        .map_err(|_| LoginDenied::unavailable())?;
+    if access.roles.is_empty() {
+        return Err(LoginDenied::forbidden("Ihr Konto hat keinen Zugang."));
+    }
+    Ok(User { name: login.claims.name.clone().unwrap_or_default(), roles: access.roles })
+})
+.cookie_name("crm")                // __Host-crm_sid, __Host-crm_login
+.base_path("/api/auth")            // /api/auth/login, /callback, /logout, /backchannel-logout
+.scopes(&["profile", "email", "roles"])
+.keep_id_token(true)               // id_token_hint at the logout (sealed, see below)
+.build()?;
+
+async fn me(session: Session<User>) -> axum::Json<Vec<String>> { axum::Json(session.data.roles) }
+
+let app = Router::new()
+    .route("/api/me", get(me))
+    .with_state(bff.clone())                  // or `impl FromRef<AppState> for Bff<User>`
+    .merge(bff.router())
+    .layer(Csrf::header("x-requested-with", "crm")?.exempt_path("/api/auth/backchannel-logout"));
+// In the worker: store.delete_expired(chrono::Utc::now()).await?;
+```
+
+- **Stored:** only the SHA-256 of the session and login cookie values. The login state (PKCE verifier, nonce)
+  and the optional ID token are sealed with AES-256-GCM under a key derived from the cookie value, so a copy
+  of the database reveals neither and needs no server key. No access or refresh token is kept.
+- **Cookies:** `__Host-<name>_sid` (`HttpOnly; Secure; Path=/`, `SameSite=Strict` or `Lax`) and
+  `__Host-<name>_login` (10 minutes, `SameSite=Lax`, single use). Only a plain-HTTP loopback redirect URI
+  (local development) drops `Secure` and the prefix.
+- **Rotation:** every login gets a new 256-bit session id; the session of the cookie the browser brought is
+  deleted.
+- **Lifetime:** idle and absolute timeout (`<PREFIX>_SESSION_IDLE_SECS`, `<PREFIX>_SESSION_MAX_SECS`); the
+  last use is written at most once a minute. Expired sessions are deleted on access and by `delete_expired`.
+- **`returnTo`:** only a path on the same origin (one leading `/`, no `//`, no `\`, visible ASCII, at most
+  512 characters), otherwise `/`.
+- **Logout:** `POST <base>/logout` (behind the app's `Csrf` layer) ends the session and answers
+  `{"logoutUrl": "…"}` – the provider's logout with `id_token_hint` and `post_logout_redirect_uri`.
+  `POST <base>/backchannel-logout` (exempt from CSRF) verifies the logout token and ends the sessions of its
+  `sid`, without `sid` all of its `sub`; `200` or a bare `400`.
+- **Errors:** login and callback answer with a short German HTML page (fixed texts, replaceable with
+  `.error_page(…)`); the `Session` extractor with `401 {"code":"UNAUTHENTICATED",…}`. Use
+  `Option<Session<T>>` or `bff.session(&headers)` for an own error shape.
+- **Rate limit:** each `GET <base>/login` writes a row before anyone is authenticated; limit it in the app
+  (e.g. a `route_layer` keyed on `ClientIp`).
 
 Variables: [`docs/configuration.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/docs/configuration.md).
 

@@ -23,5 +23,17 @@ pub fn reference_markdown() -> String {
             crate::telemetry::TelemetryConfig::VARIABLES,
         ));
     }
+    #[cfg(feature = "bff")]
+    {
+        out.push_str("\n### Login and sessions (`z40-fundament-http`, feature `bff`)\n\n");
+        out.push_str(
+            "Read with `BffConfig::from_lookup(prefix, lookup)`. Apps that already use `AUTH_ISSUER`, \
+             `AUTH_CLIENT_ID`, … pass the prefix `AUTH`.\n\n",
+        );
+        out.push_str(&variable_table(
+            "<PREFIX>",
+            crate::bff::BffConfig::VARIABLES,
+        ));
+    }
     out
 }

@@ -1,6 +1,6 @@
 [package]
 name = "z40-fundament-http"
-description = "HTTP groundwork for axum apps: request ids, a redacting trace layer, log setup, security headers, no-store, client address behind trusted proxies and a CSRF header guard."
+description = "HTTP groundwork for axum apps: request ids, a redacting trace layer, log setup, security headers, no-store, client address behind trusted proxies, a CSRF header guard and server-side OIDC login with sessions."
 version.workspace = true
 edition.workspace = true
 rust-version.workspace = true
@@ -10,7 +10,7 @@ repository.workspace = true
 readme = "README.md"
 keywords = ["axum", "middleware", "security-headers", "csrf", "tracing"]
 categories = ["web-programming::http-server"]
-include = ["src/**/*.rs", "tests/**/*.rs", "README.md", "LICENSE-MIT", "LICENSE-APACHE"]
+include = ["src/**/*.rs", "tests/**/*.rs", "schema/*.sql", "README.md", "LICENSE-MIT", "LICENSE-APACHE"]
 
 [lints]
 workspace = true
@@ -23,6 +23,11 @@ request-id = ["dep:uuid"]
 trace = ["dep:tower-http", "tower-http/trace", "axum/matched-path"]
 # Global log setup (JSON lines or readable text, `EnvFilter`) from `<PREFIX>_LOG` and `<PREFIX>_LOG_FORMAT`.
 telemetry = ["dep:tracing-subscriber", "dep:tracing-log"]
+# Login and sessions for backend-for-frontend apps: OIDC login with `z40-auth`, session cookie, session
+# store trait and extractor, logout and back-channel logout.
+bff = ["dep:z40-auth", "dep:aws-lc-rs", "dep:base64", "dep:chrono", "dep:serde", "dep:tokio", "dep:url"]
+# MariaDB/MySQL (sqlx) implementation of the session store of `bff`.
+bff-mysql = ["bff", "dep:sqlx"]
 
 [dependencies]
 # Always on: security headers, no-store, client address, CSRF guard and the shared configuration helpers.
@@ -41,9 +46,24 @@ tracing-log = { version = "0.2.0", optional = true, default-features = false, fe
 tracing-subscriber = { version = "0.3.20", optional = true, default-features = false, features = ["std", "fmt", "ansi", "env-filter", "json"] }
 uuid = { version = "1.18.0", optional = true, features = ["v7"] }
 
+# `bff`: the relying-party library of the login (with its axum extractors).
+z40-auth = { version = "0.5.0", optional = true, features = ["axum"] }
+# `bff`: random session ids, SHA-256 and AES-256-GCM. Already the crypto backend of `z40-auth`, so no
+# second crypto library is built.
+aws-lc-rs = { version = "1.18.2", optional = true }
+base64 = { version = "0.22.1", optional = true }
+chrono = { version = "0.4.42", optional = true, default-features = false, features = ["clock", "std"] }
+serde = { version = "1.0.219", optional = true, features = ["derive"] }
+# `bff`: the lazily discovered login client (`OnceCell`).
+tokio = { version = "1.45.0", optional = true, default-features = false, features = ["sync"] }
+# `bff`: URL checks of the configuration and the query of the login route. Already used by `z40-auth`.
+url = { version = "2.5.4", optional = true }
+sqlx = { version = "0.9.0", optional = true, default-features = false, features = ["mysql", "runtime-tokio", "tls-rustls-ring-webpki", "chrono"] }
+
 [dev-dependencies]
-axum = { version = "0.8.4", default-features = false, features = ["json", "tokio", "matched-path"] }
-tokio = { version = "1.45.0", features = ["macros", "rt"] }
+# `http1` and `form`: the fake login provider of the `bff` tests runs as a real server.
+axum = { version = "0.8.4", default-features = false, features = ["http1", "json", "tokio", "matched-path", "form"] }
+tokio = { version = "1.45.0", features = ["macros", "rt", "rt-multi-thread", "net"] }
 tower = { version = "0.5.2", features = ["util"] }
 tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt", "std"] }
 # Only for the example that wires the client address into the status endpoint.

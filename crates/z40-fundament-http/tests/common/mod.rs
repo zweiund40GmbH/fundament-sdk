@@ -37,3 +37,12 @@ pub fn capture_logs() -> (Capture, DefaultGuard) {
         .finish();
     (capture, tracing::subscriber::set_default(subscriber))
 }
+
+#[cfg(feature = "bff")]
+pub mod app;
+#[cfg(feature = "bff-mysql")]
+pub mod db;
+#[cfg(feature = "bff")]
+pub mod memory;
+#[cfg(feature = "bff")]
+pub mod oidc;
