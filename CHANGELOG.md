@@ -6,6 +6,7 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-08
 ### Added
 
 - `z40-fundament-http`, feature `bff`: login and sessions for backend-for-frontend apps with `z40-auth` 0.5.
@@ -152,7 +153,8 @@ All notable changes to this project are documented in this file. The format is b
 - `replica`: `Mapping`, `KeepFields`, `ReplicaStore`, `Replica` adapter.
 - `replica-mysql`: `MySqlStore` with configurable table prefix and `schema/mysql.sql`.
 
-[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.4.0...HEAD
+[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.3.0...v0.4.0
 [0.3.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.2.0...v0.2.1
