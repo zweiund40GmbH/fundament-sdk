@@ -1,17 +1,13 @@
 //! [`SessionStore`] for [`MySqlSessionStore`] and the expiry cleanup.
 
 use super::MySqlSessionStore;
+use super::error::db;
 use crate::bff::{PendingLogin, SessionRecord, SessionStore, TokenHash};
 use chrono::{DateTime, NaiveDateTime, SubsecRound, Utc};
 use z40_fundament::StoreError;
 
 /// Rows deleted per statement of the cleanup (keeps each statement short).
 const CLEANUP_BATCH: u64 = 1000;
-
-/// Wraps a database error.
-fn db(e: sqlx::Error) -> StoreError {
-    StoreError::new(e)
-}
 
 /// `t` cut to milliseconds (`DATETIME(3)`), so MySQL's rounding never moves an end later.
 fn ms(t: DateTime<Utc>) -> NaiveDateTime {

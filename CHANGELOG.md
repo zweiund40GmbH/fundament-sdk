@@ -88,7 +88,9 @@ All notable changes to this project are documented in this file. The format is b
 - `z40-fundament-http`: a request a layer answers itself (e.g. refused by `Csrf`) no longer keeps the
   readiness reservation of the inner service (e.g. a permit of a `ConcurrencyLimit`): `call` takes the
   ready inner service out, leaves a clone behind and drops the ready one on rejection.
-
+- `z40-fundament-http`, feature `bff-mysql`: `MySqlSessionStore` and `MySqlLoginLimitStore` classify their
+  errors like the stores of `z40-fundament` (`StoreError::kind()`: deadlock, lock wait timeout and lost
+  connections are retryable, a duplicate key is a conflict) instead of always `Other`.
 
 ## [0.5.0] - 2026-11-08
 ### Added

@@ -1,6 +1,7 @@
 //! [`MySqlLoginLimitStore`]: the counters of the shared login limit in the table `bff_login_limit`.
 
 use super::SessionTables;
+use super::error::db;
 use crate::bff::{LoginLimitStore, TokenHash};
 use chrono::{DateTime, SubsecRound, Utc};
 use sqlx::MySqlPool;
@@ -34,7 +35,7 @@ impl MySqlLoginLimitStore {
                 .bind(CLEANUP_BATCH)
                 .execute(&self.pool)
                 .await
-                .map_err(StoreError::new)?
+                .map_err(db)?
                 .rows_affected();
             total += done;
             if done < CLEANUP_BATCH {
@@ -54,7 +55,7 @@ impl LoginLimitStore for MySqlLoginLimitStore {
         window_end: DateTime<Utc>,
     ) -> Result<u64, StoreError> {
         let start = window_start.naive_utc().trunc_subsecs(0);
-        let mut tx = self.pool.begin().await.map_err(StoreError::new)?;
+        let mut tx = self.pool.begin().await.map_err(db)?;
         sqlx::query(self.tables.sql(
             "INSERT INTO {login_limit} (`key_hash`, `window_start`, `count`, `expires_at`) \
              VALUES (?, ?, 1, ?) ON DUPLICATE KEY UPDATE `count` = `count` + 1",
@@ -64,7 +65,7 @@ impl LoginLimitStore for MySqlLoginLimitStore {
         .bind(window_end.naive_utc().trunc_subsecs(3))
         .execute(&mut *tx)
         .await
-        .map_err(StoreError::new)?;
+        .map_err(db)?;
         let (count,): (u64,) =
             sqlx::query_as(self.tables.sql(
                 "SELECT `count` FROM {login_limit} WHERE `key_hash` = ? AND `window_start` = ?",
@@ -73,8 +74,8 @@ impl LoginLimitStore for MySqlLoginLimitStore {
             .bind(start)
             .fetch_one(&mut *tx)
             .await
-            .map_err(StoreError::new)?;
-        tx.commit().await.map_err(StoreError::new)?;
+            .map_err(db)?;
+        tx.commit().await.map_err(db)?;
         Ok(count)
     }
 }

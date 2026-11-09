@@ -9,6 +9,7 @@
 //! are not input but validated identifiers. Run [`MySqlSessionStore::delete_expired`] (and
 //! [`MySqlLoginLimitStore::delete_expired`] when it is used) periodically from the app's worker.
 
+mod error;
 mod limit;
 mod store;
 
