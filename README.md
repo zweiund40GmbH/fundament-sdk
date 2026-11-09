@@ -27,7 +27,7 @@ Ready-made MariaDB/MySQL implementations live behind their own feature. The seco
 | `replica` | Local replica of feed records: `Mapping` (which fields you keep), `ReplicaStore`, the `Replica` adapter (version rule, tombstones) |
 | `replica-mysql` | `MySqlStore`: sqlx/MariaDB implementation of all consumer and replica traits (`GET_LOCK`, page and cursor in one transaction), schema in [`schema/mysql.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql.sql) |
 | `status` | Status document types and builder, and an axum router for `GET /fundament/v1/status` with key check and failure brake |
-| `status-client` | Reading the status of other apps: `StatusClient` (`GET /fundament/v1/status`, 2 s deadline, no redirects, 256 KiB limit, lenient parsing, fixed error texts), `StatusKeys` (one status key per target app) and `poll_all` (bounded parallel polling) |
+| `status-client` | Reading the status of other apps: `StatusClient` (`GET /fundament/v1/status`, 2 s deadline, no redirects, 256 KiB limit, lenient parsing, fixed error texts), `StatusKeys` (one status key per target app), `StatusPoller` (one HTTP client for many apps, `fetch` and bounded parallel `poll_all`) |
 | `feed-source` | Serving a feed: `FeedEndpoint` (axum router for `GET /fundament/v1/events`: key check, failure brake, `on_failed_attempt` hook, query rules, `hasMore`), the `FeedSourceStore` and `SourceStatusStore` traits, `assign_cursors_once` for the worker; with `status` also `source_status` (`angebote`, `abrufer`, failed attempts) |
 | `feed-source-mysql` | `MySqlSource`: sqlx/MariaDB outbox written in the app's transaction (also without a pool: `OutboxWriter`; `occurred_at` from the database clock unless set), database errors classified (deadlock and lock wait retryable), cursor assigner after commit (`GET_LOCK`), retention that keeps the newest state per record, poll log; schema in [`schema/mysql-source.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql-source.sql) |
 
@@ -168,7 +168,7 @@ z40-fundament = { version = "0.5", features = ["status-client"] }
 ```
 
 ```rust,ignore
-use z40_fundament::status::{StatusClient, StatusKeys, StatusTarget, poll_all};
+use z40_fundament::status::{StatusClient, StatusKeys, StatusPoller, StatusTarget};
 
 // MON_STATUS_KEYS=crm=<key at crm>,billing=<key at billing> (docs/configuration.md)
 let keys = StatusKeys::from_lookup("MON", |k| std::env::var(k).ok())?;
@@ -181,12 +181,14 @@ if let Some(key) = keys.get("crm") {
     }
 }
 
-// Many apps, at most 4 at a time; targets without a key are skipped:
+// Many apps over one HTTP client: build the poller once and keep it (connections and trusted roots are
+// reused). At most 4 at a time; targets without a key are skipped:
+let poller = StatusPoller::new()?;
 let targets = [
     StatusTarget::new("crm", "https://crm.example.com")?,
     StatusTarget::new("billing", "https://billing.example.com")?,
 ];
-for (app, result) in poll_all(&targets, &keys, 4).await? {
+for (app, result) in poller.poll_all(&targets, &keys, 4).await {
     // store or show `result`
 }
 ```

@@ -72,6 +72,19 @@ impl StatusTarget {
     /// The target `app` at the `https://` `origin` (one trailing `/` allowed).
     pub fn new(app: &str, origin: &str) -> Result<Self, StatusClientError> {
         let origin = http_client::https_origin(origin).ok_or(StatusClientError::InvalidUrl)?;
+        Self::checked(app, origin)
+    }
+
+    /// Like [`StatusTarget::new`], but for a plain `http://` origin on a **loopback** address (a local
+    /// server in tests; poll it with [`super::StatusPoller::plain_http_for_tests`]).
+    pub fn plain_http_for_tests(app: &str, origin: &str) -> Result<Self, StatusClientError> {
+        let origin =
+            http_client::loopback_http_origin(origin).ok_or(StatusClientError::InvalidUrl)?;
+        Self::checked(app, origin)
+    }
+
+    /// The target with a validated `origin`, if `app` is a valid name.
+    fn checked(app: &str, origin: String) -> Result<Self, StatusClientError> {
         if !crate::credentials::name_is_valid(app) {
             return Err(StatusClientError::InvalidApp);
         }
@@ -79,17 +92,6 @@ impl StatusTarget {
             app: app.to_owned(),
             origin,
         })
-    }
-
-    /// A plain-http loopback target for tests of this crate.
-    #[cfg(test)]
-    #[cfg(feature = "status")]
-    pub(crate) fn loopback(app: &str, origin: &str) -> Self {
-        let origin = http_client::loopback_http_origin(origin).expect("loopback origin");
-        Self {
-            app: app.to_owned(),
-            origin,
-        }
     }
 
     /// The app name.
@@ -143,7 +145,7 @@ impl StatusClient {
     }
 
     /// Client on a shared `http` for the validated `origin`.
-    pub(crate) fn with_http(http: reqwest::Client, origin: &str, key: BearerKey) -> Self {
+    fn with_http(http: reqwest::Client, origin: &str, key: BearerKey) -> Self {
         Self {
             http,
             url: format!("{origin}{STATUS_PATH}"),
@@ -153,43 +155,52 @@ impl StatusClient {
 
     /// Fetches and checks the status document ([`StatusDocument::from_json`]).
     pub async fn fetch(&self) -> Result<StatusDocument, StatusFetchError> {
-        let res = self
-            .http
-            .get(&self.url)
-            .bearer_auth(self.key.expose())
-            .header(reqwest::header::ACCEPT, "application/json")
-            .send()
-            .await
-            .map_err(|e| self.transport(e))?;
-        if !res.status().is_success() {
-            return Err(StatusFetchError::Status(res.status().as_u16()));
-        }
-        let body = http_client::read_body(res, FETCH_BODY_MAX)
-            .await
-            .map_err(|e| match e {
-                BodyError::TooLarge => self.invalid("too large"),
-                BodyError::Transport(e) => self.transport(e),
-            })?;
-        StatusDocument::from_json(&body).map_err(|e| self.invalid(e.0))
+        fetch_document(&self.http, &self.url, &self.key).await
     }
+}
 
-    /// Maps a transport error to `Timeout` or `Unreachable` and logs its cause chain.
-    fn transport(&self, e: reqwest::Error) -> StatusFetchError {
-        let cause = http_client::cause_chain(&e);
-        if e.is_timeout() {
-            tracing::warn!(url = %self.url, %cause, "status: no answer in time");
-            StatusFetchError::Timeout
-        } else {
-            tracing::warn!(url = %self.url, %cause, "status: app not reachable");
-            StatusFetchError::Unreachable
-        }
+/// `GET url` with `key` as bearer key on `http`; checks status, body size and document. Shared by
+/// [`StatusClient`] and [`super::StatusPoller`].
+pub(crate) async fn fetch_document(
+    http: &reqwest::Client,
+    url: &str,
+    key: &BearerKey,
+) -> Result<StatusDocument, StatusFetchError> {
+    let res = http
+        .get(url)
+        .bearer_auth(key.expose())
+        .header(reqwest::header::ACCEPT, "application/json")
+        .send()
+        .await
+        .map_err(|e| transport(url, e))?;
+    if !res.status().is_success() {
+        return Err(StatusFetchError::Status(res.status().as_u16()));
     }
+    let body = http_client::read_body(res, FETCH_BODY_MAX)
+        .await
+        .map_err(|e| match e {
+            BodyError::TooLarge => invalid(url, "too large"),
+            BodyError::Transport(e) => transport(url, e),
+        })?;
+    StatusDocument::from_json(&body).map_err(|e| invalid(url, e.0))
+}
 
-    /// Logs why the answer was refused (a field name, never the body).
-    fn invalid(&self, reason: &str) -> StatusFetchError {
-        tracing::warn!(url = %self.url, reason, "status: invalid answer");
-        StatusFetchError::Invalid
+/// Maps a transport error to `Timeout` or `Unreachable` and logs its cause chain.
+fn transport(url: &str, e: reqwest::Error) -> StatusFetchError {
+    let cause = http_client::cause_chain(&e);
+    if e.is_timeout() {
+        tracing::warn!(url, %cause, "status: no answer in time");
+        StatusFetchError::Timeout
+    } else {
+        tracing::warn!(url, %cause, "status: app not reachable");
+        StatusFetchError::Unreachable
     }
+}
+
+/// Logs why the answer was refused (a field name, never the body).
+fn invalid(url: &str, reason: &str) -> StatusFetchError {
+    tracing::warn!(url, reason, "status: invalid answer");
+    StatusFetchError::Invalid
 }
 
 #[cfg(test)]

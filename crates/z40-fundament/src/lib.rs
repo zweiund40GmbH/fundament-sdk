@@ -23,7 +23,8 @@
 //! * `replica-mysql` → [`replica_mysql`] – sqlx/MariaDB implementations of the storage traits
 //! * `status` → [`status`] – status document, builder and axum endpoint
 //! * `status-client` → [`status`] – status document and [`status::StatusClient`] to read the status of
-//!   other apps, with per-app keys ([`status::StatusKeys`]) and [`status::poll_all`]
+//!   other apps, with per-app keys ([`status::StatusKeys`]) and [`status::StatusPoller`] (one HTTP
+//!   client for many apps)
 //! * `feed-source` → [`feed_source`] – serving a feed: query rules, page building, axum endpoint and the
 //!   [`feed_source::FeedSourceStore`] trait
 //! * `feed-source-mysql` → [`feed_source_mysql`] – sqlx/MariaDB outbox (also without a pool:

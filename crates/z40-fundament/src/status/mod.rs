@@ -6,7 +6,8 @@
 //!   [`StatusEndpoint`] (axum) checks the status key, brakes guessers and answers within the deadline,
 //!   with the [`StatusProvider`] trait the app implements
 //! * `status-client`: [`StatusClient`] reads the document of another app, [`StatusKeys`] holds one
-//!   status key per target app, [`poll_all`] polls many apps with bounded concurrency
+//!   status key per target app, [`StatusPoller`] reads many apps over one HTTP client (with
+//!   [`StatusPoller::poll_all`] for bounded concurrency; [`poll_all`] builds a poller per call)
 
 #[cfg(feature = "status")]
 pub mod builder;
@@ -33,7 +34,7 @@ pub use handler::{ClientIp, FailedAttemptHook, StatusEndpoint, StatusProvider};
 #[cfg(feature = "status-client")]
 pub use keys::{StatusKeys, StatusKeysError};
 #[cfg(feature = "status-client")]
-pub use poll::{PollResult, poll_all};
+pub use poll::{PollResult, StatusPoller, poll_all};
 
 #[cfg(feature = "status")]
 use crate::config::{ConfigError, ConfigVar};

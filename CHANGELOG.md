@@ -22,6 +22,10 @@ All notable changes to this project are documented in this file. The format is b
 - `z40-fundament`, feature `feed-source`: `FeedEndpoint::on_failed_attempt(hook)`, called on every `401` (not on
   `429`), like `StatusEndpoint::on_failed_attempt`; `FailedAttemptHook` is shared by both and also exported from
   `feed_source`.
+- `z40-fundament`, feature `status-client`: `StatusPoller` holds one HTTP client for many targets:
+  `StatusPoller::new()`, `fetch(&target, &key)` and `poll_all(&targets, &keys, concurrency)`; the free
+  `poll_all` uses a new poller per call. `StatusPoller::plain_http_for_tests()` and
+  `StatusTarget::plain_http_for_tests(app, origin)` for loopback servers in tests.
 
 ### Changed
 
