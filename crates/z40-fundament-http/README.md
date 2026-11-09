@@ -152,9 +152,10 @@ let app = Router::new()
   Residual risk: a flood from many /64s can use up the total and block new logins for everyone for the rest
   of the minute (existing sessions are unaffected). Counters are per instance by default (N instances → N×
   limit); `.login_limit_store(store.login_limit_store())` (`bff-mysql`, table `bff_login_limit` of the
-  schema) shares them between instances with the same rules, in full-minute windows; if that store fails,
-  the start fails (`500`) instead of passing unlimited. Run `MySqlLoginLimitStore::delete_expired` in the
-  worker as well.
+  schema) shares them between instances with the same rules, in full-minute windows (from each instance's
+  clock: keep the clocks in sync); if that store fails, the start fails (`500`) instead of passing unlimited.
+  Addresses are stored as a keyed hash (HMAC under a key derived from the client secret, pseudonymised),
+  so run `MySqlLoginLimitStore::delete_expired` in the worker as well.
 - **Settings:** `BffConfig` is built with `from_lookup`, `from_lookup_with` or `BffConfig::new`; `build()`
   checks the URLs again. URLs are `https://`; plain-HTTP loopback URLs (`http://localhost:…`) are refused
   unless the app allows them for development, and defaults it computes (client id, redirect URIs from its

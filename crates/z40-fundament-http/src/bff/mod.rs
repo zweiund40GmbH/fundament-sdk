@@ -165,6 +165,9 @@ pub enum BffBuildError {
     /// A login limit of 0.
     #[error("login limit must be at least 1")]
     LoginLimit,
+    /// The key of the shared login limit could not be derived (the crypto library refused).
+    #[error(transparent)]
+    Crypto(#[from] token::CryptoError),
 }
 
 /// Longest accepted `sub` (and the `sub` column of `bff-mysql`).

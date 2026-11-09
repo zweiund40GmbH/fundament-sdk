@@ -18,17 +18,19 @@
 //! sync (NTP).
 
 use super::WINDOW;
+use super::key::AddressKey;
 use crate::bff::store::BoxFuture;
-use crate::bff::token::TokenHash;
+use crate::bff::token::{CryptoError, TokenHash};
 use chrono::{DateTime, TimeDelta, Utc};
 use std::future::Future;
 use std::net::IpAddr;
-use z40_fundament::StoreError;
+use z40_fundament::{SecretString, StoreError};
 
 /// Counters of the login limit shared by the instances of an app ([`super::super::BffBuilder::login_limit_store`]).
 ///
-/// A key is the SHA-256 of `total` or a hash of the client address (IPv6 reduced to its /64), never the
-/// address itself.
+/// A key is a fixed constant for the total, or for a client address (IPv6 reduced to its /64) a keyed
+/// hash (HMAC-SHA-256 under a key derived from the BFF client secret): pseudonymised, never the address
+/// itself, but rows must still be removed after their window (e.g. `delete_expired` of `bff-mysql`).
 ///
 /// Windows come from the clock of each instance (not the store's): if the clocks of the instances
 /// differ, near a minute boundary some count into the next window while others still count into the
@@ -86,10 +88,39 @@ pub(super) fn window_start(now: DateTime<Utc>) -> DateTime<Utc> {
     DateTime::from_timestamp(start, 0).unwrap_or(now)
 }
 
+/// A shared store and the key of its address counters.
+pub(crate) struct SharedCounters {
+    store: Box<dyn DynLimitStore>,
+    key: AddressKey,
+}
+
+impl SharedCounters {
+    /// Counters in `store`, address keys derived from the client secret `secret`.
+    pub(crate) fn new(
+        store: Box<dyn DynLimitStore>,
+        secret: &SecretString,
+    ) -> Result<Self, CryptoError> {
+        let key = AddressKey::derive(secret)?;
+        Ok(Self { store, key })
+    }
+
+    /// See [`allow_at`].
+    pub(super) async fn allow_at(
+        &self,
+        ip: IpAddr,
+        per_ip: u32,
+        total: u32,
+        now: DateTime<Utc>,
+    ) -> Result<bool, StoreError> {
+        allow_at(self.store.as_ref(), &self.key, ip, per_ip, total, now).await
+    }
+}
+
 /// Whether a start from `ip` (already reduced to its /64) at `now` stays within `per_ip` and `total`
-/// in the shared `store`; counts it (see the module docs).
-pub(super) async fn allow_at(
+/// in the shared `store`; counts it (see the module docs). `key` hashes the address.
+async fn allow_at(
     store: &dyn DynLimitStore,
+    key: &AddressKey,
     ip: IpAddr,
     per_ip: u32,
     total: u32,
@@ -101,7 +132,7 @@ pub(super) async fn allow_at(
     if store.count(&all, start).await? >= u64::from(total) {
         return Ok(false);
     }
-    let address = TokenHash::of(&format!("ip:{ip}"));
+    let address = key.of(ip);
     if store.increment(&address, start, end).await? > u64::from(per_ip) {
         return Ok(false);
     }
@@ -154,6 +185,10 @@ mod tests {
         s.parse().unwrap()
     }
 
+    fn key() -> AddressKey {
+        AddressKey::derive(&SecretString::new("s3cr3t")).unwrap()
+    }
+
     fn at(secs: i64) -> DateTime<Utc> {
         DateTime::from_timestamp(secs, 0).unwrap()
     }
@@ -169,7 +204,8 @@ mod tests {
     #[tokio::test]
     async fn per_address_and_total_like_the_local_counters() {
         let m = Memory::default();
-        let allow = |a: &'static str, t| allow_at(&m, ip(a), 2, 3, t);
+        let k = key();
+        let allow = |a: &'static str, t| allow_at(&m, &k, ip(a), 2, 3, t);
         let t = at(1_800_000_010);
         assert!(allow("192.0.2.1", t).await.unwrap() && allow("192.0.2.1", t).await.unwrap());
         assert!(!allow("192.0.2.1", t).await.unwrap(), "per address");
@@ -190,17 +226,18 @@ mod tests {
     #[tokio::test]
     async fn refused_by_the_total_writes_nothing() {
         let m = Memory::default();
+        let k = key();
         let t = at(1_800_000_000);
         for i in 0..3 {
             assert!(
-                allow_at(&m, ip(&format!("192.0.2.{i}")), 5, 3, t)
+                allow_at(&m, &k, ip(&format!("192.0.2.{i}")), 5, 3, t)
                     .await
                     .unwrap()
             );
         }
         for i in 0..50 {
             let a = ip(&format!("198.51.100.{i}"));
-            assert!(!allow_at(&m, a, 5, 3, t).await.unwrap());
+            assert!(!allow_at(&m, &k, a, 5, 3, t).await.unwrap());
         }
         assert_eq!(
             m.counts.lock().unwrap().len(),
@@ -212,12 +249,13 @@ mod tests {
     #[tokio::test]
     async fn refused_per_address_does_not_use_up_the_total() {
         let m = Memory::default();
+        let k = key();
         let t = at(1_800_000_000);
         for _ in 0..20 {
-            allow_at(&m, ip("192.0.2.1"), 1, 3, t).await.unwrap();
+            allow_at(&m, &k, ip("192.0.2.1"), 1, 3, t).await.unwrap();
         }
-        assert!(allow_at(&m, ip("192.0.2.2"), 1, 3, t).await.unwrap());
-        assert!(allow_at(&m, ip("192.0.2.3"), 1, 3, t).await.unwrap());
+        assert!(allow_at(&m, &k, ip("192.0.2.2"), 1, 3, t).await.unwrap());
+        assert!(allow_at(&m, &k, ip("192.0.2.3"), 1, 3, t).await.unwrap());
     }
 
     #[tokio::test]
@@ -226,6 +264,11 @@ mod tests {
             fail: true,
             ..Memory::default()
         };
-        assert!(allow_at(&m, ip("192.0.2.1"), 1, 3, at(0)).await.is_err());
+        let k = key();
+        assert!(
+            allow_at(&m, &k, ip("192.0.2.1"), 1, 3, at(0))
+                .await
+                .is_err()
+        );
     }
 }

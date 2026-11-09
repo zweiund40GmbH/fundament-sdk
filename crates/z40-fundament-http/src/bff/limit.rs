@@ -12,11 +12,12 @@
 //! IPv6 addresses count by their /64 (`brake_address`). Shared windows follow the clock of each instance:
 //! with clock skew between instances up to twice the limit may pass near a minute boundary.
 
+mod key;
 mod local;
 mod shared;
 
-pub(crate) use shared::DynLimitStore;
 pub use shared::LoginLimitStore;
+pub(crate) use shared::{DynLimitStore, SharedCounters};
 
 use axum::http::request::Parts;
 use local::LocalCounters;
@@ -42,8 +43,8 @@ pub(crate) fn connect_info() -> ClientIpFn {
 enum Counters {
     /// In this process (the default).
     Local(LocalCounters),
-    /// In a store shared by all instances.
-    Shared(Box<dyn DynLimitStore>),
+    /// In a store shared by all instances (boxed: the HMAC key is large).
+    Shared(Box<SharedCounters>),
 }
 
 /// Login starts per client address and in total, per [`WINDOW`].
@@ -74,14 +75,14 @@ impl LoginLimit {
         per_ip: u32,
         total: u32,
         client_ip: Option<ClientIpFn>,
-        store: Option<Box<dyn DynLimitStore>>,
+        store: Option<SharedCounters>,
     ) -> Self {
         let default_resolver = client_ip.is_none();
         Self {
             per_ip,
             total,
             counters: match store {
-                Some(store) => Counters::Shared(store),
+                Some(store) => Counters::Shared(Box::new(store)),
                 None => Counters::Local(LocalCounters::new()),
             },
             client_ip: client_ip.unwrap_or_else(connect_info),
@@ -120,9 +121,9 @@ impl LoginLimit {
         let ip = brake_address(self.address(parts));
         match &self.counters {
             Counters::Local(c) => Ok(c.allow_at(ip, self.per_ip, self.total, Instant::now())),
-            Counters::Shared(store) => {
+            Counters::Shared(shared) => {
                 let now = chrono::Utc::now();
-                shared::allow_at(store.as_ref(), ip, self.per_ip, self.total, now).await
+                shared.allow_at(ip, self.per_ip, self.total, now).await
             }
         }
     }

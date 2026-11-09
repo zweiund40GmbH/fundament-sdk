@@ -1,5 +1,6 @@
 //! `MySqlLoginLimitStore` against MariaDB (`TEST_DATABASE_URL`): atomic counters, the login limit shared
-//! by two instances (per address and in total), its cleanup, and a failing store.
+//! by two instances (per address and in total, so both derive the same address key), its cleanup, and a
+//! failing store.
 #![cfg(all(feature = "bff-mysql", feature = "test-util"))]
 #![allow(clippy::unwrap_used)]
 
@@ -99,6 +100,11 @@ async fn login_limit_total_is_shared_by_instances() {
                 "three addresses and the total; refused by the total: no row"
             );
             assert!(rows.iter().all(|(k, _)| k.len() == 32), "only hashes");
+            let plain = TokenHash::of("ip:192.0.2.1");
+            assert!(
+                rows.iter().all(|(k, _)| k[..] != plain.as_bytes()[..]),
+                "keyed, not the plain SHA-256 of the address"
+            );
             let limits = MySqlSessionStore::new(pool.clone(), tables()).login_limit_store();
             assert_eq!(
                 limits.delete_expired(Utc::now()).await.unwrap(),

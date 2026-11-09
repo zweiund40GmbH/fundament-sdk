@@ -2,7 +2,7 @@
 //! [`BffBuilder::build`].
 
 use super::cookies::Cookies;
-use super::limit::{ClientIpFn, DynLimitStore, LoginLimit, LoginLimitStore};
+use super::limit::{ClientIpFn, DynLimitStore, LoginLimit, LoginLimitStore, SharedCounters};
 use super::page;
 use super::store::DynStore;
 use super::{
@@ -106,7 +106,8 @@ impl<T: SessionData> BffBuilder<T> {
     /// Keeps the counters of the login limit in `store`, shared by all instances of the app (e.g.
     /// `bff_mysql::MySqlLoginLimitStore`), instead of in this process: N instances then allow the
     /// configured limit, not N times it. Same rules (per client address, IPv6 by /64, and in total;
-    /// `429` with `Retry-After`, nothing written); windows are full minutes (UTC). When the store fails,
+    /// `429` with `Retry-After`, nothing written); windows are full minutes (UTC). Addresses are stored
+    /// as a keyed hash (HMAC under a key derived from the client secret). When the store fails,
     /// the login start fails (`500` page) instead of passing unlimited.
     pub fn login_limit_store(mut self, store: impl LoginLimitStore) -> Self {
         self.limit_store = Some(Box::new(store));
@@ -163,12 +164,14 @@ impl<T: SessionData> BffBuilder<T> {
             Some((per_ip, total)) if per_ip == 0 || total == 0 => {
                 return Err(BffBuildError::LoginLimit);
             }
-            Some((per_ip, total)) => Some(LoginLimit::new(
-                per_ip,
-                total,
-                self.client_ip,
-                self.limit_store,
-            )),
+            Some((per_ip, total)) => {
+                let secret = &self.config.client_secret;
+                let shared = self
+                    .limit_store
+                    .map(|store| SharedCounters::new(store, secret))
+                    .transpose()?;
+                Some(LoginLimit::new(per_ip, total, self.client_ip, shared))
+            }
             None => None,
         };
         Ok(Bff {

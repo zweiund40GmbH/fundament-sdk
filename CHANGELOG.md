@@ -69,8 +69,10 @@ All notable changes to this project are documented in this file. The format is b
   with `Retry-After: 60`; a refused start writes no login) in full-minute windows (UTC, from each instance's
   clock: with clock skew up to twice the limit may pass near a minute boundary). The total is read first:
   once it is used up a start is refused without writing a counter row, so a flood from many addresses adds
-  no rows (apart from a few under concurrency). Keys are SHA-256 hashes, never addresses. A failing
-  store fails the start (`500` page). The default stays the in-process counters.
+  no rows (apart from a few under concurrency). Addresses are stored as a keyed hash (HMAC-SHA-256 under a
+  key derived with HKDF from the client secret; pseudonymised, rows must be removed by `delete_expired`), the
+  total under a fixed key. A failing store fails the start (`500` page). The default stays the in-process
+  counters. `BffBuildError::Crypto` if the key cannot be derived.
 - `z40-fundament-http`, feature `bff-mysql`: `MySqlLoginLimitStore` (`new(pool, tables)`,
   `MySqlSessionStore::login_limit_store()`, `delete_expired(now)`) over the new table `bff_login_limit` in
   `schema/mysql-session.sql` and `SessionTables::schema()` (`CREATE TABLE IF NOT EXISTS`; only needed with
