@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- `z40-fundament`, no feature: `StoreErrorKind` (`Retryable`, `Conflict`, `Other`) with `StoreError::kind()`,
+  `StoreError::is_retryable()` and `StoreError::with_kind(kind, error)`. The MariaDB/MySQL implementations
+  classify their errors: deadlock (1213), lock wait timeout (1205), I/O errors, pool timeout and a crashed
+  connection worker are retryable, a duplicate key (1062) is a conflict. No sqlx type in the public API.
+
 ### Changed
 
 - `z40-fundament`, features `feed-consumer` and `status-client`: reqwest 0.13 (rustls with the aws-lc-rs

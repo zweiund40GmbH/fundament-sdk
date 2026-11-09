@@ -12,6 +12,7 @@
 //! * [`health`] – health rule of a consumed source and the events on change
 //! * [`config`] – `from_lookup` configuration helpers and the generated reference
 //! * [`secret`] – a string type with redacted `Debug`
+//! * [`StoreError`] – the storage error with its [`StoreErrorKind`] (retryable, conflict, other)
 //!
 //! Behind features:
 //!
@@ -64,4 +65,4 @@ pub mod status;
 mod store;
 
 pub use secret::SecretString;
-pub use store::StoreError;
+pub use store::{StoreError, StoreErrorKind};
