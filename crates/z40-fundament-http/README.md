@@ -64,6 +64,9 @@ axum::serve(listener, app.into_make_service_with_connect_info::<std::net::Socket
 - **CSRF answer:** `403 {"code":"CSRF","message":"Anfrage abgelehnt (CSRF-Schutz). Bitte laden Sie die Seite
   neu."}` – the error form and German fixed texts of the `z40-fundament` endpoints. Apps with their own error
   shape pass `.rejection(|| …)`; apps with another check (e.g. a double-submit cookie) use `Csrf::check(…)`.
+- **CSRF header without a start-up error:** `Csrf::header_static(const { CsrfHeader::new("x-requested-with",
+  "crm") })` checks name and value at compile time (a safelisted name or an empty value does not compile), so
+  no fallback for a failed `Csrf::header(…)?` is needed.
 - **CSP per route group:** headers are only added when missing. A route that sets its own CSP keeps it (`X-Frame-Options` then follows its `frame-ancestors`); a
   router group gets its own `SecurityHeaders` layer before it is merged.
 - **HSTS** is the job of the edge proxy that terminates TLS.

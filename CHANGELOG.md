@@ -17,6 +17,9 @@ All notable changes to this project are documented in this file. The format is b
 - `z40-fundament-http`: `TrustedProxies::client_ip`, `resolver()`, the `ClientIp` extractor and the default
   client address of the `bff` login limit also take the peer from axum's `MockConnectInfo<SocketAddr>` (router
   tests without a server); a real `ConnectInfo` wins. The README shows the `FromRef` impl for `ClientIp`.
+- `z40-fundament-http`: `csrf::CsrfHeader::new(name, value)` (`const fn`) and the infallible
+  `Csrf::header_static(header)`. Built in a const context, a bad name (not a lowercase header token, or
+  CORS-safelisted) or value (empty, not visible ASCII) is a compile error.
 
 ### Fixed
 

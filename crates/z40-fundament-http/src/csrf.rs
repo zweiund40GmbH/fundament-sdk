@@ -29,6 +29,10 @@
 //! # }
 //! ```
 
+mod header;
+
+pub use header::CsrfHeader;
+
 use crate::middleware::{Hook, Sealed, hook_layer};
 use crate::no_store::set_no_store;
 use crate::paths::Scope;
@@ -111,10 +115,31 @@ impl Csrf {
             .ok()
             .filter(|_| ok)
             .ok_or(CsrfConfigError::Value)?;
-        Ok(Self::check(move |h: &HeaderMap| {
+        Ok(Self::guard(name, value))
+    }
+
+    /// Requires the header of `header`, checked at compile time (see [`CsrfHeader`]): unlike
+    /// [`Csrf::header`] this cannot fail, so an app needs no fallback for a start-up error.
+    ///
+    /// ```
+    /// use z40_fundament_http::csrf::{Csrf, CsrfHeader};
+    ///
+    /// let layer = Csrf::header_static(const { CsrfHeader::new("x-requested-with", "crm") });
+    /// ```
+    pub fn header_static(header: CsrfHeader) -> Self {
+        // Cannot panic: `CsrfHeader::new` accepted only lowercase tokens and visible ASCII, a subset of
+        // what `from_static` takes (unit test in `header.rs`).
+        let name = HeaderName::from_static(header.name);
+        let value = HeaderValue::from_static(header.value);
+        Self::guard(name, value)
+    }
+
+    /// The check of a header `name` with exactly `value`.
+    fn guard(name: HeaderName, value: HeaderValue) -> Self {
+        Self::check(move |h: &HeaderMap| {
             h.get(&name)
                 .is_some_and(|v| v.as_bytes() == value.as_bytes())
-        }))
+        })
     }
 
     /// Lets a state-changing request pass when `check` returns `true` for its headers.
@@ -251,6 +276,17 @@ mod tests {
         assert!(!c.allows(&post, "/x", &headers(&[("x-requested-with", "CRM")])));
         assert!(c.allows(&post, "/x", &headers(&[("x-requested-with", "crm")])));
         assert!(c.allows(&Method::GET, "/x", &HeaderMap::new()));
+    }
+
+    #[test]
+    fn static_header_matches_like_the_checked_one() {
+        const H: CsrfHeader = CsrfHeader::new("x-requested-with", "crm");
+        let c = Csrf::header_static(H);
+        let post = Method::POST;
+        assert!(c.allows(&post, "/x", &headers(&[("x-requested-with", "crm")])));
+        assert!(!c.allows(&post, "/x", &headers(&[("x-requested-with", "CRM")])));
+        assert!(!c.allows(&post, "/x", &HeaderMap::new()));
+        assert_eq!((H.name(), H.value()), ("x-requested-with", "crm"));
     }
 
     #[test]
