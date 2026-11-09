@@ -7,7 +7,7 @@ use super::{
     FeedQuery, FeedSourceStore, QueryError, REQUEST_ASSIGN_WAIT, assign_logged, build_page,
 };
 use crate::credentials::{FailureBrake, KeyList};
-use crate::http::{Checked, Gate, error, internal, json_ok};
+use crate::http::{Checked, FailedAttemptHook, Gate, error, internal, json_ok};
 use crate::protocol::EVENTS_PATH;
 use axum::Router;
 use axum::extract::{Query, Request};
@@ -32,6 +32,7 @@ pub struct FeedEndpoint<S> {
     store: Arc<S>,
     gate: Gate,
     failures: Arc<FailureCounter>,
+    on_failed_attempt: Option<FailedAttemptHook>,
 }
 
 impl<S: FeedSourceStore> FeedEndpoint<S> {
@@ -41,7 +42,16 @@ impl<S: FeedSourceStore> FeedEndpoint<S> {
             store: Arc::new(store),
             gate: Gate::new(keys, "feed"),
             failures: Arc::new(FailureCounter::default()),
+            on_failed_attempt: None,
         }
+    }
+
+    /// Calls `hook` on every request with a missing or wrong feed key (not on braked ones), in
+    /// addition to the failure count of the store, e.g. for metrics or an alert. It runs inside the
+    /// request: keep it cheap and non-blocking (e.g. increment an atomic counter).
+    pub fn on_failed_attempt(mut self, hook: impl Fn() + Send + Sync + 'static) -> Self {
+        self.on_failed_attempt = Some(Arc::new(hook));
+        self
     }
 
     /// Shares `brake` with other endpoints (e.g. the status endpoint of the same app).
@@ -83,6 +93,9 @@ impl<S: FeedSourceStore> FeedEndpoint<S> {
                 // In memory; at most one task writes to the store, so a `401` never waits for the
                 // database and guessers cannot create database work per request.
                 self.failures.count(&self.store);
+                if let Some(hook) = &self.on_failed_attempt {
+                    hook();
+                }
                 return res;
             }
         };

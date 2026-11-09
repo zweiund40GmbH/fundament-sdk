@@ -231,3 +231,35 @@ async fn store_failure_is_500_without_details() {
     assert_eq!(v["code"], "INTERNAL");
     assert!(!v.to_string().contains("database"));
 }
+
+#[tokio::test]
+async fn failed_attempt_hook_fires_on_401_not_on_429() {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    let count = Arc::new(AtomicU64::new(0));
+    let seen = Arc::clone(&count);
+    let store = Fake {
+        types: vec![T.into()],
+        events: Vec::new(),
+        fail_read: false,
+        log: Arc::default(),
+    };
+    let keys = KeyList::parse(&key_entry("crm", "good-key").unwrap()).unwrap();
+    let r: Router = FeedEndpoint::new(store, keys)
+        .on_failed_attempt(move || {
+            seen.fetch_add(1, Ordering::SeqCst);
+        })
+        .router();
+    for _ in 0..(MAX_FAILURES + 3) {
+        call(&r, Some("Bearer wrong"), "", "203.0.113.9").await;
+    }
+    let (s, _) = call(&r, Some("Bearer good-key"), "", "203.0.113.9").await;
+    assert_eq!(s, StatusCode::TOO_MANY_REQUESTS);
+    assert_eq!(
+        count.load(Ordering::SeqCst),
+        u64::from(MAX_FAILURES),
+        "braked ones are not counted"
+    );
+    let (s, _) = call(&r, Some("Bearer good-key"), "", "203.0.113.10").await;
+    assert_eq!(s, StatusCode::OK, "a valid key does not fire the hook");
+    assert_eq!(count.load(Ordering::SeqCst), u64::from(MAX_FAILURES));
+}

@@ -19,6 +19,10 @@ use std::time::Instant;
 /// configuration) that takes `X-Forwarded-For` only from trusted proxy addresses.
 pub type ClientIp = Arc<dyn Fn(&Parts) -> Option<IpAddr> + Send + Sync>;
 
+/// Called on every request with a missing or wrong key (not on braked ones), see
+/// `StatusEndpoint::on_failed_attempt` and `FeedEndpoint::on_failed_attempt`.
+pub type FailedAttemptHook = Arc<dyn Fn() + Send + Sync>;
+
 /// Message of `401`.
 const MSG_UNAUTHENTICATED: &str = "Anmeldung erforderlich.";
 /// Message of `429`.

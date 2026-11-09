@@ -26,6 +26,7 @@ mod query;
 #[cfg(feature = "status")]
 mod status;
 
+pub use crate::http::FailedAttemptHook;
 pub use config::{DEFAULT_RETENTION_DAYS, FeedSourceConfig, RETENTION_DAYS_RANGE};
 pub use endpoint::FeedEndpoint;
 pub use page::build_page;

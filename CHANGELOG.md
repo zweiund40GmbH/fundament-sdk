@@ -16,6 +16,9 @@ All notable changes to this project are documented in this file. The format is b
   `write(&mut tx, &event)` writes outbox events without a pool (same checks and `VersionExists` as before);
   `MySqlSource::write_event` delegates to it, `MySqlSource::writer()` returns it.
   `WriteEventError::is_retryable()`.
+- `z40-fundament`, feature `feed-source`: `FeedEndpoint::on_failed_attempt(hook)`, called on every `401` (not on
+  `429`), like `StatusEndpoint::on_failed_attempt`; `FailedAttemptHook` is shared by both and also exported from
+  `feed_source`.
 
 ### Changed
 
