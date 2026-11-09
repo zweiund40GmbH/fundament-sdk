@@ -55,11 +55,13 @@ All notable changes to this project are documented in this file. The format is b
   CORS-safelisted) or value (empty, not visible ASCII) is a compile error.
 - `z40-fundament-http`, feature `telemetry`: `TelemetryConfig::from_lookup_with(prefix, lookup, Defaults {
   filter, format })` – the app's default filter (after `<PREFIX>_LOG` and `RUST_LOG`) and format (after
-  `<PREFIX>_LOG_FORMAT`); an invalid default filter is an error on `<PREFIX>_LOG`.
+  `<PREFIX>_LOG_FORMAT`); an invalid default filter is an error on `<PREFIX>_LOG`. Write `Defaults` literals
+  with `..Defaults::default()`: fields may be added in minor versions before 1.0.
 - `z40-fundament-http`, feature `bff`: `BffConfig::from_lookup_with(prefix, lookup, Defaults { client_id,
   redirect_uri, post_logout_redirect_uri, allow_loopback_http })` for defaults the app computes (used when
   the variable is unset or empty, URLs checked like the variables); the field and builder-style setter
-  `BffConfig::allow_loopback_http`.
+  `BffConfig::allow_loopback_http`. Write `Defaults` literals with `..Defaults::default()`: fields may be
+  added in minor versions before 1.0.
 - `z40-fundament-http`, feature `test-util` (new, test-only): `test_util::FakeProvider` (`start(client_id)`,
   `issuer`, `authorize`, `logout_token`, `sign`), the fake login provider of this crate's own tests, for the
   tests of `bff` apps; `bff::token::generate` is public with this feature.

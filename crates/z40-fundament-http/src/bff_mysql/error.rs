@@ -5,7 +5,8 @@
 
 use z40_fundament::{StoreError, StoreErrorKind};
 
-/// The kind of a database error.
+/// The kind of a database error. Keep in sync with `kind_of` in `z40-fundament` (`src/sql.rs`), which
+/// cannot be shared without putting sqlx into the public API of the core crate.
 fn kind_of(e: &sqlx::Error) -> StoreErrorKind {
     match e {
         sqlx::Error::Io(_) | sqlx::Error::PoolTimedOut | sqlx::Error::WorkerCrashed => {

@@ -42,6 +42,8 @@ fn error_number(e: &sqlx::Error) -> Option<u16> {
 
 /// The kind of a database error: server errors by number ([`StoreErrorKind::from_mysql_code`]); I/O
 /// errors (lost or refused connection), a pool timeout and a crashed connection worker are retryable.
+/// Keep in sync with `kind_of` in `z40-fundament-http` (`src/bff_mysql/error.rs`): sharing it would put
+/// sqlx into the public API of this crate.
 fn kind_of(e: &sqlx::Error) -> StoreErrorKind {
     match e {
         sqlx::Error::Io(_) | sqlx::Error::PoolTimedOut | sqlx::Error::WorkerCrashed => {

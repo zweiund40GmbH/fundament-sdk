@@ -41,17 +41,19 @@ pub struct InvalidFilter;
 /// The app's defaults for [`TelemetryConfig::from_lookup_with`], used when the variables are unset or
 /// empty. `Default`: [`DEFAULT_FILTER`] and JSON (what [`TelemetryConfig::from_lookup`] uses).
 ///
+/// Write struct literals with `..Defaults::default()`: new fields may be added in minor versions before
+/// 1.0 (the struct is not `#[non_exhaustive]`, which would forbid struct literals outside this crate).
+///
 /// ```
 /// use z40_fundament_http::telemetry::{Defaults, LogFormat, TelemetryConfig};
 ///
 /// # fn main() -> Result<(), z40_fundament::config::ConfigError> {
-/// let development = true;
 /// let defaults = Defaults {
 ///     filter: "info,sqlx=warn".into(),
-///     format: if development { LogFormat::Text } else { LogFormat::Json },
+///     ..Defaults::default()
 /// };
 /// let config = TelemetryConfig::from_lookup_with("APP", |_| None, defaults)?;
-/// assert_eq!((config.filter.as_str(), config.format), ("info,sqlx=warn", LogFormat::Text));
+/// assert_eq!((config.filter.as_str(), config.format), ("info,sqlx=warn", LogFormat::Json));
 /// # Ok(())
 /// # }
 /// ```

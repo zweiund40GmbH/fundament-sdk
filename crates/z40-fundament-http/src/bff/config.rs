@@ -51,6 +51,9 @@ pub struct BffConfig {
 /// Defaults the app computes for [`BffConfig::from_lookup_with`] (e.g. the redirect URI from its public
 /// URL), used when the variable is unset or empty; and whether plain-HTTP loopback URLs are accepted.
 /// `Default`: no defaults, loopback HTTP refused (what [`BffConfig::from_lookup`] uses).
+///
+/// Write struct literals with `..Defaults::default()`: new fields may be added in minor versions before
+/// 1.0 (the struct is not `#[non_exhaustive]`, which would forbid struct literals outside this crate).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Defaults {
     /// Default of `<PREFIX>_CLIENT_ID`.
@@ -220,8 +223,8 @@ impl BffConfig {
     /// let defaults = Defaults {
     ///     client_id: Some("crm".into()),
     ///     redirect_uri: Some(format!("{public_url}/api/auth/callback")),
-    ///     post_logout_redirect_uri: Some(format!("{public_url}/")),
     ///     allow_loopback_http: development,
+    ///     ..Defaults::default()
     /// };
     /// let config = BffConfig::from_lookup_with("AUTH", env, defaults)?;
     /// assert_eq!(config.client_id, "crm");
