@@ -187,6 +187,13 @@ async fn concurrent_increments_each_get_their_own_count() {
             assert_eq!(limits.count(&key, start).await.unwrap(), 20, "read");
             let other = limits.increment(&key, end, end + TimeDelta::seconds(60));
             assert_eq!(other.await.unwrap(), 1, "next window starts at 1");
+            let fresh = TokenHash::of("other");
+            assert_eq!(
+                limits.increment(&fresh, start, end).await.unwrap(),
+                1,
+                "new row"
+            );
+            assert_eq!(limits.increment(&fresh, start, end).await.unwrap(), 2);
             let unused = start - TimeDelta::seconds(60);
             assert_eq!(limits.count(&key, unused).await.unwrap(), 0, "no row");
         },

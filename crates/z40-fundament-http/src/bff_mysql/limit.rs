@@ -46,37 +46,29 @@ impl MySqlLoginLimitStore {
 }
 
 impl LoginLimitStore for MySqlLoginLimitStore {
-    /// `INSERT … ON DUPLICATE KEY UPDATE` and a read of the row in one transaction: the row stays
-    /// locked until the commit, so each call reads its own count.
+    /// One statement, no transaction: `INSERT … ON DUPLICATE KEY UPDATE` that hands the new count back
+    /// through `LAST_INSERT_ID(expr)`, which is per connection and travels in the statement's OK packet
+    /// (`last_insert_id`). Both branches set it: a new row with `LAST_INSERT_ID(1)` in `VALUES`, an
+    /// existing one with `LAST_INSERT_ID(count + 1)` in the update (evaluated after `VALUES`, so it wins).
+    /// The row lock is held only for the one statement.
     async fn increment(
         &self,
         key: &TokenHash,
         window_start: DateTime<Utc>,
         window_end: DateTime<Utc>,
     ) -> Result<u64, StoreError> {
-        let start = window_start.naive_utc().trunc_subsecs(0);
-        let mut tx = self.pool.begin().await.map_err(db)?;
-        sqlx::query(self.tables.sql(
+        let done = sqlx::query(self.tables.sql(
             "INSERT INTO {login_limit} (`key_hash`, `window_start`, `count`, `expires_at`) \
-             VALUES (?, ?, 1, ?) ON DUPLICATE KEY UPDATE `count` = `count` + 1",
+             VALUES (?, ?, LAST_INSERT_ID(1), ?) \
+             ON DUPLICATE KEY UPDATE `count` = LAST_INSERT_ID(`count` + 1)",
         ))
         .bind(&key.as_bytes()[..])
-        .bind(start)
+        .bind(window_start.naive_utc().trunc_subsecs(0))
         .bind(window_end.naive_utc().trunc_subsecs(3))
-        .execute(&mut *tx)
+        .execute(&self.pool)
         .await
         .map_err(db)?;
-        let (count,): (u64,) =
-            sqlx::query_as(self.tables.sql(
-                "SELECT `count` FROM {login_limit} WHERE `key_hash` = ? AND `window_start` = ?",
-            ))
-            .bind(&key.as_bytes()[..])
-            .bind(start)
-            .fetch_one(&mut *tx)
-            .await
-            .map_err(db)?;
-        tx.commit().await.map_err(db)?;
-        Ok(count)
+        Ok(done.last_insert_id())
     }
 
     /// A plain read of the row (0 when there is none); takes no lock.
