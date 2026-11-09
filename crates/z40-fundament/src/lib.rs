@@ -29,6 +29,7 @@
 //!   [`feed_source::FeedSourceStore`] trait
 //! * `feed-source-mysql` → [`feed_source_mysql`] – sqlx/MariaDB outbox (also without a pool:
 //!   [`feed_source_mysql::OutboxWriter`]), cursor assigner, retention and poll log
+//! * `test-util` → [`test_util`] – helpers for the tests of apps (keys, feed pages, status documents)
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod config;
@@ -65,6 +66,9 @@ mod sql;
 pub mod status;
 
 mod store;
+#[cfg(feature = "test-util")]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+pub mod test_util;
 
 pub use secret::SecretString;
 pub use store::{StoreError, StoreErrorKind};
