@@ -23,7 +23,7 @@ impl MySqlSource {
         cursor: u64,
         at: DateTime<Utc>,
     ) -> Result<(), StoreError> {
-        sqlx::query(self.tables.sql(
+        sqlx::query(self.writer.tables.sql(
             "INSERT INTO {poll} (`consumer`, `last_poll`, `cursor`) VALUES (?, ?, ?) \
              ON DUPLICATE KEY UPDATE `last_poll` = VALUES(`last_poll`), `cursor` = VALUES(`cursor`)",
         ))
@@ -43,7 +43,7 @@ impl MySqlSource {
         at: DateTime<Utc>,
     ) -> Result<(), StoreError> {
         let count = u32::try_from(count).unwrap_or(u32::MAX);
-        sqlx::query(self.tables.sql(
+        sqlx::query(self.writer.tables.sql(
             "INSERT INTO {failure} (`hour`, `attempts`) VALUES (?, ?) \
              ON DUPLICATE KEY UPDATE `attempts` = LEAST(`attempts` + VALUES(`attempts`), 4294967295)",
         ))
@@ -57,25 +57,28 @@ impl MySqlSource {
 }
 
 impl SourceStatusStore for MySqlSource {
-    /// Two queries per known type over the indexes `(type, cursor)` and `(type, occurred_at)`.
-    async fn offer_figures(&self, now: DateTime<Utc>) -> Result<Vec<OfferFigures>, StoreError> {
-        let mut out = Vec::with_capacity(self.types.len());
-        for record_type in &self.types {
+    /// Two queries per known type over the indexes `(type, cursor)` and `(type, occurred_at)`. The
+    /// windows end at the database clock (`UTC_TIMESTAMP`), the clock of events written without an
+    /// explicit time, not at `now` (ignored here; the trait keeps it for other stores): app and
+    /// database clocks may differ.
+    async fn offer_figures(&self, _now: DateTime<Utc>) -> Result<Vec<OfferFigures>, StoreError> {
+        let mut out = Vec::with_capacity(self.writer.types.len());
+        for record_type in &self.writer.types {
             let last: Option<u64> = sqlx::query_scalar(
-                self.tables
+                self.writer
+                    .tables
                     .sql("SELECT MAX(`cursor`) FROM {outbox} WHERE `type` = ?"),
             )
             .bind(record_type)
             .fetch_one(&self.pool)
             .await
             .map_err(db)?;
-            let (h24, m5): (i64, i64) = sqlx::query_as(self.tables.sql(
-                "SELECT COUNT(*), CAST(COALESCE(SUM(`occurred_at` > ?), 0) AS SIGNED) \
-                 FROM {outbox} WHERE `type` = ? AND `occurred_at` > ?",
+            let (h24, m5): (i64, i64) = sqlx::query_as(self.writer.tables.sql(
+                "SELECT COUNT(*), \
+                   CAST(COALESCE(SUM(`occurred_at` > UTC_TIMESTAMP(3) - INTERVAL 5 MINUTE), 0) AS SIGNED) \
+                 FROM {outbox} WHERE `type` = ? AND `occurred_at` > UTC_TIMESTAMP(3) - INTERVAL 24 HOUR",
             ))
-            .bind((now - chrono::Duration::minutes(5)).naive_utc())
             .bind(record_type)
-            .bind((now - chrono::Duration::hours(24)).naive_utc())
             .fetch_one(&self.pool)
             .await
             .map_err(db)?;
@@ -91,7 +94,8 @@ impl SourceStatusStore for MySqlSource {
 
     async fn polls(&self) -> Result<Vec<PollRecord>, StoreError> {
         let rows: Vec<(String, NaiveDateTime, u64)> = sqlx::query_as(
-            self.tables
+            self.writer
+                .tables
                 .sql("SELECT `consumer`, `last_poll`, `cursor` FROM {poll} ORDER BY `consumer`"),
         )
         .fetch_all(&self.pool)
@@ -109,7 +113,7 @@ impl SourceStatusStore for MySqlSource {
 
     async fn backlog(&self, cursor: u64, cap: u64) -> Result<u64, StoreError> {
         let n: i64 =
-            sqlx::query_scalar(self.tables.sql(
+            sqlx::query_scalar(self.writer.tables.sql(
                 "SELECT COUNT(*) FROM (SELECT 1 FROM {outbox} WHERE `cursor` > ? LIMIT ?) AS b",
             ))
             .bind(cursor)
@@ -121,7 +125,7 @@ impl SourceStatusStore for MySqlSource {
     }
 
     async fn failed_attempts(&self, since: DateTime<Utc>) -> Result<u64, StoreError> {
-        let n: i64 = sqlx::query_scalar(self.tables.sql(
+        let n: i64 = sqlx::query_scalar(self.writer.tables.sql(
             "SELECT CAST(COALESCE(SUM(`attempts`), 0) AS SIGNED) FROM {failure} WHERE `hour` >= ?",
         ))
         .bind(hour(since))

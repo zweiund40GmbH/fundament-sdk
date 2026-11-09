@@ -26,6 +26,7 @@ mod query;
 #[cfg(feature = "status")]
 mod status;
 
+pub use crate::http::FailedAttemptHook;
 pub use config::{DEFAULT_RETENTION_DAYS, FeedSourceConfig, RETENTION_DAYS_RANGE};
 pub use endpoint::FeedEndpoint;
 pub use page::build_page;
@@ -137,7 +138,8 @@ pub struct PollRecord {
 /// What the status document of a source needs from its storage (`angebote`, `abrufer`, failed
 /// attempts). Every query must be bounded, so the status answers within 2 seconds.
 pub trait SourceStatusStore: Send + Sync {
-    /// Figures per record type at `now` (types without events may be missing).
+    /// Figures per record type at `now` (types without events may be missing). A store may measure the
+    /// windows against its own clock, the one its events are stamped with.
     fn offer_figures(
         &self,
         now: DateTime<Utc>,

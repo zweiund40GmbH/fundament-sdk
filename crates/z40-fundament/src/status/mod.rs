@@ -1,12 +1,13 @@
 //! The status document of an app (`GET /fundament/v1/status`, `docs/protocol.md` §3): types with the
 //! exact wire names, and both sides of the endpoint.
 //!
-//! * [`document`] – the wire types (with `status` or `status-client`)
+//! * [`document`] – the wire types (re-exported from [`crate::protocol::status`], which needs no feature)
 //! * `status`: [`builder`] – [`StatusBuilder`] derives the overall level; [`handler`] –
 //!   [`StatusEndpoint`] (axum) checks the status key, brakes guessers and answers within the deadline,
 //!   with the [`StatusProvider`] trait the app implements
 //! * `status-client`: [`StatusClient`] reads the document of another app, [`StatusKeys`] holds one
-//!   status key per target app, [`poll_all`] polls many apps with bounded concurrency
+//!   status key per target app, [`StatusPoller`] reads many apps over one HTTP client (with
+//!   [`StatusPoller::poll_all`] for bounded concurrency; [`poll_all`] builds a poller per call)
 
 #[cfg(feature = "status")]
 pub mod builder;
@@ -18,10 +19,9 @@ pub mod handler;
 #[cfg(feature = "status-client")]
 mod keys;
 #[cfg(feature = "status-client")]
-mod parse;
-#[cfg(feature = "status-client")]
 mod poll;
 
+pub use crate::protocol::status::InvalidDocument;
 #[cfg(feature = "status")]
 pub use builder::{BACKLOG_CAP, MAX_EVENTS, StatusBuilder, events_per_minute};
 #[cfg(feature = "status-client")]
@@ -34,9 +34,7 @@ pub use handler::{ClientIp, FailedAttemptHook, StatusEndpoint, StatusProvider};
 #[cfg(feature = "status-client")]
 pub use keys::{StatusKeys, StatusKeysError};
 #[cfg(feature = "status-client")]
-pub use parse::InvalidDocument;
-#[cfg(feature = "status-client")]
-pub use poll::{PollResult, poll_all};
+pub use poll::{PollResult, StatusPoller, poll_all};
 
 #[cfg(feature = "status")]
 use crate::config::{ConfigError, ConfigVar};

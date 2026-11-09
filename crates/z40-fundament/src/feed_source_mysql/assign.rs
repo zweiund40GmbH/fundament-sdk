@@ -53,7 +53,7 @@ impl MySqlSource {
         conn.close_on_drop();
         let got: Option<i64> =
             sqlx::query_scalar("SELECT GET_LOCK(LEFT(CONCAT(?, ':', DATABASE()), 64), 0)")
-                .bind(&self.tables.lock)
+                .bind(&self.writer.tables.lock)
                 .fetch_one(&mut *conn)
                 .await
                 .map_err(db)?;
@@ -88,7 +88,7 @@ impl MySqlSource {
         }
         // Closing the connection on drop releases the lock anyway; releasing explicitly is tidier.
         let _ = sqlx::query("SELECT RELEASE_LOCK(LEFT(CONCAT(?, ':', DATABASE()), 64))")
-            .bind(&self.tables.lock)
+            .bind(&self.writer.tables.lock)
             .execute(&mut *conn)
             .await;
         Ok(AssignOutcome::Assigned(total))
@@ -98,7 +98,8 @@ impl MySqlSource {
     async fn batch(&self, conn: &mut MySqlConnection) -> Result<usize, sqlx::Error> {
         let mut tx = conn.begin().await?;
         let last: Option<u64> = sqlx::query_scalar(
-            self.tables
+            self.writer
+                .tables
                 .sql("SELECT `last` FROM {counter} WHERE `id` = 1 FOR UPDATE"),
         )
         .fetch_optional(&mut *tx)
@@ -107,7 +108,7 @@ impl MySqlSource {
         // `(cursor, id)` holds the unassigned rows (`NULL`) in `id` order: the locking read stops after
         // `BATCH` rows (no filesort, so only those rows are locked) and waits only when an open
         // transaction's row is among the first `BATCH` unassigned ones.
-        let ids: Vec<u64> = sqlx::query_scalar(self.tables.sql(
+        let ids: Vec<u64> = sqlx::query_scalar(self.writer.tables.sql(
             "SELECT `id` FROM {outbox} FORCE INDEX (`ix_fundament_outbox_unassigned`) \
              WHERE `cursor` IS NULL ORDER BY `id` LIMIT ? FOR UPDATE",
         ))
@@ -130,7 +131,7 @@ impl MySqlSource {
         last: u64,
     ) -> Result<(), sqlx::Error> {
         let mut q = sqlx::QueryBuilder::<sqlx::MySql>::new(
-            self.tables.sql("UPDATE {outbox} SET `cursor` = ").0,
+            self.writer.tables.sql("UPDATE {outbox} SET `cursor` = ").0,
         );
         q.push_bind(last);
         q.push(" + FIELD(`id`");
@@ -145,7 +146,8 @@ impl MySqlSource {
         q.push(")");
         q.build().execute(&mut *tx).await?;
         sqlx::query(
-            self.tables
+            self.writer
+                .tables
                 .sql("UPDATE {counter} SET `last` = ? WHERE `id` = 1"),
         )
         .bind(last + ids.len() as u64)

@@ -16,7 +16,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-pub use crate::http::ClientIp;
+pub use crate::http::{ClientIp, FailedAttemptHook};
 
 /// Error of a [`StatusProvider`] (logged, never sent to the client).
 pub type BoxError = Box<dyn std::error::Error + Send + Sync>;
@@ -46,10 +46,6 @@ pub struct StatusEndpoint<P> {
     deadline: Duration,
     on_failed_attempt: Option<FailedAttemptHook>,
 }
-
-/// Called on every status request with a missing or wrong key (see
-/// [`StatusEndpoint::on_failed_attempt`]).
-pub type FailedAttemptHook = Arc<dyn Fn() + Send + Sync>;
 
 impl<P: StatusProvider> StatusEndpoint<P> {
     /// An endpoint answering with `provider` for callers presenting a key of `keys`.

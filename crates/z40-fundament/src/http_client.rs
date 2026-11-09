@@ -44,13 +44,23 @@ pub(crate) fn loopback_http_origin(raw: &str) -> Option<String> {
     loopback.then(|| u.origin().ascii_serialization())
 }
 
+/// The built-in Mozilla roots (`webpki-root-certs`) as reqwest certificates.
+fn built_in_roots() -> impl Iterator<Item = reqwest::Certificate> {
+    webpki_root_certs::TLS_SERVER_ROOT_CERTS
+        .iter()
+        // The bundled roots are valid DER; a root reqwest could not take is left out, not fatal.
+        .filter_map(|der| reqwest::Certificate::from_der(der).ok())
+}
+
 /// An HTTP client with the given timeouts that follows no redirects; `https_only` refuses plain http.
+/// TLS trusts the platform store and the built-in Mozilla roots.
 pub(crate) fn build(
     connect_timeout: Duration,
     total_timeout: Duration,
     https_only: bool,
 ) -> reqwest::Result<reqwest::Client> {
     reqwest::Client::builder()
+        .tls_certs_merge(built_in_roots())
         .connect_timeout(connect_timeout)
         .timeout(total_timeout)
         .redirect(reqwest::redirect::Policy::none())

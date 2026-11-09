@@ -1,5 +1,8 @@
-//! What the MariaDB/MySQL implementations share: validated table names. Table names cannot be bind
-//! parameters, so they are checked identifiers and only ever quoted into constant statement templates.
+//! What the MariaDB/MySQL implementations share: validated table names and the classification of
+//! database errors ([`StoreErrorKind`]). Table names cannot be bind parameters, so they are checked
+//! identifiers and only ever quoted into constant statement templates.
+
+use crate::{StoreError, StoreErrorKind};
 
 /// A table name is not 1–64 characters of `a-z A-Z 0-9 _` (or a prefix longer than 16).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -30,7 +33,29 @@ pub(crate) fn check_names(names: &[&str]) -> Result<(), InvalidTableName> {
         .ok_or(InvalidTableName)
 }
 
-/// Wraps a database error.
-pub(crate) fn db(e: sqlx::Error) -> crate::StoreError {
-    crate::StoreError::new(e)
+/// The MariaDB/MySQL error number of `e`, if the server answered with an error.
+fn error_number(e: &sqlx::Error) -> Option<u16> {
+    e.as_database_error()
+        .and_then(|d| d.try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>())
+        .map(|m| m.number())
 }
+
+/// The kind of a database error: server errors by number ([`StoreErrorKind::from_mysql_code`]); I/O
+/// errors (lost or refused connection), a pool timeout and a crashed connection worker are retryable.
+fn kind_of(e: &sqlx::Error) -> StoreErrorKind {
+    match e {
+        sqlx::Error::Io(_) | sqlx::Error::PoolTimedOut | sqlx::Error::WorkerCrashed => {
+            StoreErrorKind::Retryable
+        }
+        _ => error_number(e).map_or(StoreErrorKind::Other, StoreErrorKind::from_mysql_code),
+    }
+}
+
+/// Wraps a database error with its [`StoreErrorKind`].
+pub(crate) fn db(e: sqlx::Error) -> StoreError {
+    StoreError::with_kind(kind_of(&e), e)
+}
+
+#[cfg(test)]
+#[path = "sql_tests.rs"]
+mod tests;

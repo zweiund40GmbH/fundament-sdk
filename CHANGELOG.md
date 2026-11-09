@@ -6,6 +6,47 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- `z40-fundament`, no feature: `StoreErrorKind` (`Retryable`, `Conflict`, `Other`) with `StoreError::kind()`,
+  `StoreError::is_retryable()`, `StoreError::with_kind(kind, error)` and `StoreErrorKind::from_mysql_code(code)`
+  for stores that classify their own MariaDB/MySQL errors. The MariaDB/MySQL implementations
+  classify their errors: deadlock (1213), lock wait timeout (1205), I/O errors, pool timeout and a crashed
+  connection worker are retryable, a duplicate key (1062) is a conflict. No sqlx type in the public API.
+- `z40-fundament`, no feature: the status document types and `StatusDocument::from_json` (with
+  `InvalidDocument`) live in `protocol::status` and need no feature; `status::document`, `status::StatusDocument`
+  and the other old paths stay as re-exports. `status::InvalidDocument` is now also exported with `status`.
+- `z40-fundament`, feature `feed-source-mysql`: `OutboxWriter::new(tables, types)` with
+  `write(&mut tx, &event)` writes outbox events without a pool (same checks and `VersionExists` as before);
+  `MySqlSource::write_event` delegates to it, `MySqlSource::writer()` returns it.
+  `WriteEventError::is_retryable()`.
+- `z40-fundament`, feature `feed-source`: `FeedEndpoint::on_failed_attempt(hook)`, called on every `401` (not on
+  `429`), like `StatusEndpoint::on_failed_attempt`; `FailedAttemptHook` is shared by both and also exported from
+  `feed_source`.
+- `z40-fundament`, feature `status-client`: `StatusPoller` holds one HTTP client for many targets:
+  `StatusPoller::new()`, `fetch(&target, &key)` and `poll_all(&targets, &keys, concurrency)`; the free
+  `poll_all` uses a new poller per call. `StatusPoller::plain_http_for_tests()` and
+  `StatusTarget::plain_http_for_tests(app, origin)` for loopback servers in tests.
+- `z40-fundament`, feature `test-util`: `test_util::key(n)`, `test_util::FeedPageBuilder` (consistent feed
+  pages, also as JSON) and `test_util::status_document(app, level)`.
+
+### Changed
+
+- `z40-fundament`, features `feed-consumer` and `status-client`: reqwest 0.13 (rustls with the aws-lc-rs
+  provider and the platform verifier, plus the built-in Mozilla roots from `webpki-root-certs`; no OpenSSL).
+  Timeouts, body limits and the redirect policy are unchanged.
+- `z40-fundament`, feature `feed-source-mysql`: `MySqlSource::purge` measures the age of events against the
+  database clock, and `offer_figures` counts the last 5 minutes and 24 hours up to the database clock (the
+  `now` argument is not used), consistent with `occurred_at` stamped by the database.
+
+### Changed (breaking)
+
+- `z40-fundament`, feature `feed-source-mysql`: `OutboxEvent::occurred_at` is `Option<DateTime<Utc>>`.
+  `OutboxEvent::state` and `OutboxEvent::tombstone` leave it `None`, and the database fills it with
+  `UTC_TIMESTAMP(3)` when the event is written; `.at(t)` still sets an explicit time. Migration: code that
+  builds `OutboxEvent` with a struct literal wraps the time in `Some(…)`; code that reads the field handles
+  `None`; code that relied on the app clock calls `.at(Utc::now())`.
+
 ## [0.5.0] - 2026-11-08
 ### Added
 

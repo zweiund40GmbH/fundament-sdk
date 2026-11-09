@@ -7,11 +7,13 @@
 //!
 //! Always available (no feature):
 //!
-//! * [`protocol`] – wire types of the feed and the status level, page validation, version rule
+//! * [`protocol`] – wire types of the feed and the status document, page validation, version rule,
+//!   checked reading of a status document
 //! * [`fields`] – pure field helpers for mappings (`text_field`)
 //! * [`health`] – health rule of a consumed source and the events on change
 //! * [`config`] – `from_lookup` configuration helpers and the generated reference
 //! * [`secret`] – a string type with redacted `Debug`
+//! * [`StoreError`] – the storage error with its [`StoreErrorKind`] (retryable, conflict, other)
 //!
 //! Behind features:
 //!
@@ -21,11 +23,13 @@
 //! * `replica-mysql` → [`replica_mysql`] – sqlx/MariaDB implementations of the storage traits
 //! * `status` → [`status`] – status document, builder and axum endpoint
 //! * `status-client` → [`status`] – status document and [`status::StatusClient`] to read the status of
-//!   other apps, with per-app keys ([`status::StatusKeys`]) and [`status::poll_all`]
+//!   other apps, with per-app keys ([`status::StatusKeys`]) and [`status::StatusPoller`] (one HTTP
+//!   client for many apps)
 //! * `feed-source` → [`feed_source`] – serving a feed: query rules, page building, axum endpoint and the
 //!   [`feed_source::FeedSourceStore`] trait
-//! * `feed-source-mysql` → [`feed_source_mysql`] – sqlx/MariaDB outbox, cursor assigner, retention and
-//!   poll log
+//! * `feed-source-mysql` → [`feed_source_mysql`] – sqlx/MariaDB outbox (also without a pool:
+//!   [`feed_source_mysql::OutboxWriter`]), cursor assigner, retention and poll log
+//! * `test-util` → [`test_util`] – helpers for the tests of apps (keys, feed pages, status documents)
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod config;
@@ -62,6 +66,9 @@ mod sql;
 pub mod status;
 
 mod store;
+#[cfg(feature = "test-util")]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+pub mod test_util;
 
 pub use secret::SecretString;
-pub use store::StoreError;
+pub use store::{StoreError, StoreErrorKind};
