@@ -17,7 +17,10 @@ pub fn reference_markdown() -> String {
     #[cfg(feature = "telemetry")]
     {
         out.push_str("\n### Log setup (`z40-fundament-http`, feature `telemetry`)\n\n");
-        out.push_str("Read with `TelemetryConfig::from_lookup(prefix, lookup)`.\n\n");
+        out.push_str(
+            "Read with `TelemetryConfig::from_lookup(prefix, lookup)`, or `from_lookup_with(prefix, lookup, \
+             Defaults { filter, format })` for the app's own defaults.\n\n",
+        );
         out.push_str(&variable_table(
             "<PREFIX>",
             crate::telemetry::TelemetryConfig::VARIABLES,

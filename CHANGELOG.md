@@ -20,6 +20,9 @@ All notable changes to this project are documented in this file. The format is b
 - `z40-fundament-http`: `csrf::CsrfHeader::new(name, value)` (`const fn`) and the infallible
   `Csrf::header_static(header)`. Built in a const context, a bad name (not a lowercase header token, or
   CORS-safelisted) or value (empty, not visible ASCII) is a compile error.
+- `z40-fundament-http`, feature `telemetry`: `TelemetryConfig::from_lookup_with(prefix, lookup, Defaults {
+  filter, format })` – the app's default filter (after `<PREFIX>_LOG` and `RUST_LOG`) and format (after
+  `<PREFIX>_LOG_FORMAT`); an invalid default filter is an error on `<PREFIX>_LOG`.
 
 ### Fixed
 

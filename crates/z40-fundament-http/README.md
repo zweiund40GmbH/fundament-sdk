@@ -22,7 +22,7 @@ helpers of [`z40-fundament`](https://crates.io/crates/z40-fundament).
 | `trace` | `trace::layer()`: span with method, route template (`<unmatched>` for unknown routes, raw path only on opt-in) and request id; status and latency at the end; never query strings, headers or bodies |
 | `bff` | Login and sessions for backend-for-frontend apps with [`z40-auth`](https://crates.io/crates/z40-auth): `Bff::router()` (`GET <base>/login?returnTo=`, `GET <base>/callback`, `POST <base>/logout`, `POST <base>/backchannel-logout`), `Session<T>` extractor, `SessionStore` trait, `BffConfig` (`<PREFIX>_ISSUER`, `<PREFIX>_CLIENT_ID`, …) |
 | `bff-mysql` | `MySqlSessionStore` (MariaDB/MySQL, sqlx) with table prefix, `schema/mysql-session.sql` and `delete_expired` for the worker |
-| `telemetry` | `TelemetryConfig`: JSON lines or one-line text, `EnvFilter`, from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info`) and `<PREFIX>_LOG_FORMAT` (`json` \| `text`); `init` reports what it did (installed, installed without `log` bridge, already installed) |
+| `telemetry` | `TelemetryConfig`: JSON lines or one-line text, `EnvFilter`, from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info`) and `<PREFIX>_LOG_FORMAT` (`json` \| `text`); `from_lookup_with` takes the app's defaults (filter, format); `init` reports what it did (installed, installed without `log` bridge, already installed) |
 
 ## Quick start
 
@@ -70,6 +70,9 @@ axum::serve(listener, app.into_make_service_with_connect_info::<std::net::Socket
 - **CSP per route group:** headers are only added when missing. A route that sets its own CSP keeps it (`X-Frame-Options` then follows its `frame-ancestors`); a
   router group gets its own `SecurityHeaders` layer before it is merged.
 - **HSTS** is the job of the edge proxy that terminates TLS.
+- **Log defaults of the app:** `TelemetryConfig::from_lookup_with("APP", env, Defaults { filter:
+  "info,sqlx=warn".into(), format: if dev { LogFormat::Text } else { LogFormat::Json } })` – used when
+  `APP_LOG` (and `RUST_LOG`) or `APP_LOG_FORMAT` are unset, so the app needs no wrapper.
 
 ## Login and sessions (`bff`)
 

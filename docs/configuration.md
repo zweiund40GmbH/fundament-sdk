@@ -60,12 +60,12 @@ Read with `TrustedProxies::from_lookup(prefix, lookup)`.
 
 ### Log setup (`z40-fundament-http`, feature `telemetry`)
 
-Read with `TelemetryConfig::from_lookup(prefix, lookup)`.
+Read with `TelemetryConfig::from_lookup(prefix, lookup)`, or `from_lookup_with(prefix, lookup, Defaults { filter, format })` for the app's own defaults.
 
 | Variable | Default | Description |
 |---|---|---|
-| `<PREFIX>_LOG` | `info` | Log filter as `EnvFilter` directive, e.g. `info,sqlx=warn` or `debug`. Unset or empty: `RUST_LOG`, then `info`. An invalid directive is a configuration error. |
-| `<PREFIX>_LOG_FORMAT` | `json` | `json` (one JSON object per line, for log collectors) or `text` (readable text, one line per event, for local work). |
+| `<PREFIX>_LOG` | `info` | Log filter as `EnvFilter` directive, e.g. `info,sqlx=warn` or `debug`. Unset or empty: `RUST_LOG`, then `info` (or the app's default). An invalid directive is a configuration error. |
+| `<PREFIX>_LOG_FORMAT` | `json` | `json` (one JSON object per line, for log collectors) or `text` (readable text, one line per event, for local work). Unset or empty: `json` (or the app's default). |
 
 ### Login and sessions (`z40-fundament-http`, feature `bff`)
 
