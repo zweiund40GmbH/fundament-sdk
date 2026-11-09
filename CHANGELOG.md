@@ -6,6 +6,12 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Changed
+
+- `z40-fundament`, features `feed-consumer` and `status-client`: reqwest 0.13 (rustls with the aws-lc-rs
+  provider and the platform verifier, plus the built-in Mozilla roots from `webpki-root-certs`; no OpenSSL).
+  Timeouts, body limits and the redirect policy are unchanged.
+
 ## [0.5.0] - 2026-11-08
 ### Added
 

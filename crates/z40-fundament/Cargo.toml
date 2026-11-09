@@ -21,7 +21,7 @@ default = []
 # outgoing bearer key.
 credentials = ["dep:sha2", "dep:subtle"]
 # Read a change feed page by page; the app provides lock, cursor and page storage via traits.
-feed-consumer = ["credentials", "dep:reqwest", "dep:tracing"]
+feed-consumer = ["credentials", "dep:reqwest", "dep:webpki-root-certs", "dep:tracing"]
 # Keep a local replica of feed records (version rule, tombstones, projection hook).
 replica = ["feed-consumer"]
 # Ready-made MariaDB/MySQL (sqlx) implementations of the consumer and replica traits.
@@ -29,7 +29,7 @@ replica-mysql = ["replica", "dep:sqlx"]
 # Serve `GET /fundament/v1/status` with axum.
 status = ["credentials", "dep:axum", "dep:tokio", "dep:tracing"]
 # Read `GET /fundament/v1/status` of other apps: client, per-app status keys, bounded parallel polling.
-status-client = ["credentials", "dep:reqwest", "dep:tracing", "dep:tokio", "tokio/rt"]
+status-client = ["credentials", "dep:reqwest", "dep:webpki-root-certs", "dep:tracing", "dep:tokio", "tokio/rt"]
 # Serve a change feed `GET /fundament/v1/events` with axum; the app provides the storage via a trait.
 feed-source = ["credentials", "dep:axum", "axum/query", "dep:tokio", "tokio/rt", "dep:tracing"]
 # Ready-made MariaDB/MySQL (sqlx) outbox, cursor assigner, retention and poll log for `feed-source`.
@@ -42,11 +42,14 @@ serde_json = "1.0.140"
 thiserror = "2.0.12"
 
 axum = { version = "0.8.4", optional = true, default-features = false, features = ["json", "tokio"] }
-# Built-in Mozilla roots plus the platform store (which honours SSL_CERT_FILE), so private CAs work too.
-reqwest = { version = "0.12.22", optional = true, default-features = false, features = ["rustls-tls-webpki-roots", "rustls-tls-native-roots"] }
+# rustls (aws-lc-rs, like z40-auth) with the platform verifier: the platform store (which honours
+# SSL_CERT_FILE on Linux), so private CAs work. No OpenSSL.
+reqwest = { version = "0.13.5", optional = true, default-features = false, features = ["rustls", "query"] }
 sha2 = { version = "0.10.9", optional = true }
 sqlx = { version = "0.9.0", optional = true, default-features = false, features = ["mysql", "runtime-tokio", "tls-rustls-ring-webpki", "chrono"] }
 subtle = { version = "2.6.1", optional = true }
+# The built-in Mozilla roots, merged into the platform verifier of reqwest (it has no feature for them).
+webpki-root-certs = { version = "1.0.4", optional = true }
 tokio = { version = "1.45.0", optional = true, default-features = false, features = ["time"] }
 tracing = { version = "0.1.41", optional = true }
 
