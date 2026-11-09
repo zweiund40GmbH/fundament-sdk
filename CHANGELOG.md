@@ -6,6 +6,18 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- `z40-fundament-http`: the layers (`Csrf`, `NoStore`, `SecurityHeaders`, `RequestIdLayer`) now require the
+  inner service to be `Clone`. Migration: none for axum apps (`Router::layer` already requires it); a
+  hand-built tower stack wraps a non-`Clone` service in `tower::buffer::Buffer` first.
+
+### Fixed
+
+- `z40-fundament-http`: a request a layer answers itself (e.g. refused by `Csrf`) no longer keeps the
+  readiness reservation of the inner service (e.g. a permit of a `ConcurrencyLimit`): `call` takes the
+  ready inner service out, leaves a clone behind and drops the ready one on rejection.
+
 ## [0.5.0] - 2026-11-08
 ### Added
 

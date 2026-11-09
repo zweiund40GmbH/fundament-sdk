@@ -4,6 +4,11 @@
 //!
 //! Apps do not use this module directly; they add the layers with axum's `Router::layer`, which hands
 //! every layer an axum [`Request`] and expects an axum [`Response`].
+//!
+//! **Readiness.** `poll_ready` reserves capacity of the inner service (e.g. a permit of a concurrency
+//! limit). `call` therefore takes the ready inner service out and leaves a fresh clone behind (the usual
+//! tower pattern): a request the hook answers itself drops the ready service with its reservation instead
+//! of keeping it, and an accepted request runs on the service that was polled ready.
 
 use axum::extract::Request;
 use axum::response::Response;
@@ -51,7 +56,7 @@ pub type HookFuture<E> = Pin<Box<dyn Future<Output = Result<Response, E>> + Send
 
 impl<S, H> Service<Request> for HookService<S, H>
 where
-    S: Service<Request, Response = Response> + Send + 'static,
+    S: Service<Request, Response = Response> + Clone + Send + 'static,
     S::Future: Send + 'static,
     H: Hook,
 {
@@ -64,12 +69,18 @@ where
         self.inner.poll_ready(cx)
     }
 
-    /// Request hook, inner service, response hook.
+    /// Request hook, inner service, response hook. The inner service polled ready is taken out (a
+    /// clone stays for the next `poll_ready`); on rejection it is dropped, releasing its reservation.
     fn call(&mut self, mut req: Request) -> Self::Future {
+        let clone = self.inner.clone();
+        let mut ready = std::mem::replace(&mut self.inner, clone);
         match self.hook.on_request(&mut req) {
-            Err(answer) => Box::pin(async move { Ok(answer) }),
+            Err(answer) => {
+                drop(ready);
+                Box::pin(async move { Ok(answer) })
+            }
             Ok(carry) => {
-                let fut = self.inner.call(req);
+                let fut = ready.call(req);
                 let hook = self.hook.clone();
                 Box::pin(async move {
                     let mut res = fut.await?;
@@ -95,3 +106,50 @@ macro_rules! hook_layer {
     };
 }
 pub(crate) use hook_layer;
+
+#[cfg(test)]
+mod tests {
+    use crate::csrf::Csrf;
+    use axum::body::Body;
+    use axum::extract::Request;
+    use axum::http::{Method, StatusCode};
+    use axum::response::Response;
+    use std::convert::Infallible;
+    use std::task::{Context, Poll, Waker};
+    use tower::limit::ConcurrencyLimit;
+    use tower::{Layer, Service, service_fn};
+
+    /// Polls `svc` for readiness once, without waiting.
+    fn ready_now<S: Service<Request>>(svc: &mut S) -> bool {
+        let mut cx = Context::from_waker(Waker::noop());
+        matches!(svc.poll_ready(&mut cx), Poll::Ready(Ok(())))
+    }
+
+    fn request(method: Method) -> Request {
+        Request::builder()
+            .method(method)
+            .uri("/x")
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn a_rejected_request_releases_the_readiness_of_the_inner_service() {
+        let ok =
+            service_fn(|_: Request| async { Ok::<_, Infallible>(Response::new(Body::empty())) });
+        let csrf = Csrf::header("x-csrf", "1").unwrap();
+        let mut first = csrf.layer(ConcurrencyLimit::new(ok, 1));
+        let mut second = first.clone();
+
+        assert!(ready_now(&mut first), "the only permit");
+        assert!(!ready_now(&mut second), "held by the first");
+        let rejected = first.call(request(Method::POST)).await.unwrap();
+        assert_eq!(rejected.status(), StatusCode::FORBIDDEN);
+        assert!(ready_now(&mut second), "the rejection gave the permit back");
+
+        let accepted = second.call(request(Method::GET));
+        assert!(!ready_now(&mut first), "taken by the accepted request");
+        assert_eq!(accepted.await.unwrap().status(), StatusCode::OK);
+        assert!(ready_now(&mut first), "released when the request is done");
+    }
+}
