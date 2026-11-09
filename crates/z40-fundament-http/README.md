@@ -21,7 +21,7 @@ helpers of [`z40-fundament`](https://crates.io/crates/z40-fundament).
 | `request-id` | `RequestIdLayer`: keeps a safe incoming `X-Request-Id` (≤ 64 of `[A-Za-z0-9._:-]`) or creates a UUID v7, echoes it, `RequestId` extension |
 | `trace` | `trace::layer()`: span with method, route template (`<unmatched>` for unknown routes, raw path only on opt-in) and request id; status and latency at the end; never query strings, headers or bodies |
 | `bff` | Login and sessions for backend-for-frontend apps with [`z40-auth`](https://crates.io/crates/z40-auth): `Bff::router()` (`GET <base>/login?returnTo=`, `GET <base>/callback`, `POST <base>/logout`, `POST <base>/backchannel-logout`), `Session<T>` extractor, `SessionStore` trait, `BffConfig` (`<PREFIX>_ISSUER`, `<PREFIX>_CLIENT_ID`, …) |
-| `bff-mysql` | `MySqlSessionStore` (MariaDB/MySQL, sqlx) with table prefix, `schema/mysql-session.sql` and `delete_expired` for the worker |
+| `bff-mysql` | `MySqlSessionStore` (MariaDB/MySQL, sqlx) with table prefix, `schema/mysql-session.sql` and `delete_expired` for the worker; `MySqlLoginLimitStore` for a login limit shared by all instances |
 | `test-util` | **Test-only** (enable in `[dev-dependencies]`): `test_util::FakeProvider`, a login provider on `127.0.0.1` (discovery, JWKS, token endpoint with PKCE check, `authorize` plays the browser, `logout_token`, `sign`) for the tests of `bff` apps, and a public `bff::token::generate` |
 | `telemetry` | `TelemetryConfig`: JSON lines or one-line text, `EnvFilter`, from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info`) and `<PREFIX>_LOG_FORMAT` (`json` \| `text`); `from_lookup_with` takes the app's defaults (filter, format); `init` reports what it did (installed, installed without `log` bridge, already installed) |
 
@@ -150,7 +150,11 @@ let app = Router::new()
   default, the TCP peer, warns once when that peer is a loopback or private address); without a client
   address all share one counter (warned once). `.without_login_limit()` if the app limits it itself.
   Residual risk: a flood from many /64s can use up the total and block new logins for everyone for the rest
-  of the minute (existing sessions are unaffected); counters are per instance (N instances → N× limit).
+  of the minute (existing sessions are unaffected). Counters are per instance by default (N instances → N×
+  limit); `.login_limit_store(store.login_limit_store())` (`bff-mysql`, table `bff_login_limit` of the
+  schema) shares them between instances with the same rules, in full-minute windows; if that store fails,
+  the start fails (`500`) instead of passing unlimited. Run `MySqlLoginLimitStore::delete_expired` in the
+  worker as well.
 - **Settings:** `BffConfig` is built with `from_lookup`, `from_lookup_with` or `BffConfig::new`; `build()`
   checks the URLs again. URLs are `https://`; plain-HTTP loopback URLs (`http://localhost:…`) are refused
   unless the app allows them for development, and defaults it computes (client id, redirect URIs from its

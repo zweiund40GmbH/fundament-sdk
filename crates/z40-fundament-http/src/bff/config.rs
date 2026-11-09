@@ -131,13 +131,14 @@ impl BffConfig {
             suffix: "LOGIN_RATE_PER_IP",
             default: Some("30"),
             description: "Login starts per client address and minute, 1–10000 (more get `429`). Counted \
-                          per process; IPv6 by /64.",
+                          per process, or across instances with a shared `LoginLimitStore`; IPv6 by /64.",
         },
         ConfigVar {
             suffix: "LOGIN_RATE_TOTAL",
             default: Some("300"),
             description: "Login starts per minute from all clients together, 1–1000000. Bounds the rows \
-                          written before anyone is authenticated. Counted per process.",
+                          written before anyone is authenticated. Counted per process, or across \
+                          instances with a shared `LoginLimitStore`.",
         },
     ];
 

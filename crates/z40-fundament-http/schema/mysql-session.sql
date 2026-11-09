@@ -2,7 +2,8 @@
 --
 -- Copy these statements into a migration of your app. The library never runs migrations in your
 -- database. With a table prefix (`SessionTables::with_prefix("app_")`) put the prefix in front of every
--- table name, or print the prefixed statements with `SessionTables::schema()`.
+-- table name, or print the prefixed statements with `SessionTables::schema()`. The third table
+-- (`bff_login_limit`) is only used by the shared login limit and may be left out without it.
 -- All times are UTC. No cookie value is stored: keys are SHA-256 hashes of the cookie values.
 
 -- Sessions after a login.
@@ -28,4 +29,15 @@ CREATE TABLE IF NOT EXISTS `bff_login` (
   `expires_at` DATETIME(3) NOT NULL COMMENT 'end of the login',
   PRIMARY KEY (`id_hash`),
   KEY `ix_bff_login_expires` (`expires_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- Counters of the login limit shared by all instances (`MySqlLoginLimitStore`, optional: only needed
+-- with `BffBuilder::login_limit_store`). One row per counter and minute; removed by its `delete_expired`.
+CREATE TABLE IF NOT EXISTS `bff_login_limit` (
+  `key_hash`     BINARY(32) NOT NULL COMMENT 'SHA-256 of the counter key (client address or total)',
+  `window_start` DATETIME NOT NULL COMMENT 'start of the one-minute window',
+  `count`        BIGINT UNSIGNED NOT NULL COMMENT 'login starts counted in the window',
+  `expires_at`   DATETIME(3) NOT NULL COMMENT 'end of the window',
+  PRIMARY KEY (`key_hash`, `window_start`),
+  KEY `ix_bff_login_limit_expires` (`expires_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

@@ -81,6 +81,6 @@ Read with `BffConfig::from_lookup(prefix, lookup)`, or `from_lookup_with(prefix,
 | `<PREFIX>_COOKIE_SAMESITE` | `strict` | `SameSite` of the session cookie: `strict` (links from other sites open the app without the session) or `lax`. The login cookie is always `lax`. |
 | `<PREFIX>_SESSION_IDLE_SECS` | `7200` | A session ends after this many seconds without a request, 60–86400 (cut to the absolute timeout). |
 | `<PREFIX>_SESSION_MAX_SECS` | `36000` | A session ends this many seconds after the login, however active, 300–2592000. Bounds how long roles taken at login stay in effect without a back-channel logout. |
-| `<PREFIX>_LOGIN_RATE_PER_IP` | `30` | Login starts per client address and minute, 1–10000 (more get `429`). Counted per process; IPv6 by /64. |
-| `<PREFIX>_LOGIN_RATE_TOTAL` | `300` | Login starts per minute from all clients together, 1–1000000. Bounds the rows written before anyone is authenticated. Counted per process. |
+| `<PREFIX>_LOGIN_RATE_PER_IP` | `30` | Login starts per client address and minute, 1–10000 (more get `429`). Counted per process, or across instances with a shared `LoginLimitStore`; IPv6 by /64. |
+| `<PREFIX>_LOGIN_RATE_TOTAL` | `300` | Login starts per minute from all clients together, 1–1000000. Bounds the rows written before anyone is authenticated. Counted per process, or across instances with a shared `LoginLimitStore`. |
 <!-- END GENERATED (z40-fundament-http) -->

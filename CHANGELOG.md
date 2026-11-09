@@ -37,6 +37,16 @@ All notable changes to this project are documented in this file. The format is b
 - `z40-fundament-http`, feature `test-util` (new, test-only): `test_util::FakeProvider` (`start(client_id)`,
   `issuer`, `authorize`, `logout_token`, `sign`), the fake login provider of this crate's own tests, for the
   tests of `bff` apps; `bff::token::generate` is public with this feature.
+- `z40-fundament-http`, feature `bff`: `LoginLimitStore` (atomic `increment(key, window_start, window_end)`)
+  and `BffBuilder::login_limit_store(store)`: the counters of the login limit shared by all instances, with
+  the same rules (per client address, IPv6 by /64, and in total; `429` with `Retry-After: 60`; a refused
+  start writes nothing) in full-minute windows (UTC). Keys are SHA-256 hashes, never addresses. A failing
+  store fails the start (`500` page). The default stays the in-process counters.
+- `z40-fundament-http`, feature `bff-mysql`: `MySqlLoginLimitStore` (`new(pool, tables)`,
+  `MySqlSessionStore::login_limit_store()`, `delete_expired(now)`) over the new table `bff_login_limit` in
+  `schema/mysql-session.sql` and `SessionTables::schema()` (`CREATE TABLE IF NOT EXISTS`; only needed with
+  the shared limit); `SessionTables::login_limit_table(name)`. `MySqlSessionStore::delete_expired` is
+  unchanged and does not touch the new table.
 
 ### Fixed
 

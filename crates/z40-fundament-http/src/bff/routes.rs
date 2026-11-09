@@ -73,8 +73,15 @@ fn return_to_param(uri: &Uri) -> Option<String> {
 /// login state and redirects to the provider.
 async fn login<T: SessionData>(State(bff): State<Bff<T>>, request: Request) -> Response {
     let (parts, _) = request.into_parts();
-    if bff.inner.limit.as_ref().is_some_and(|l| !l.allow(&parts)) {
-        return bff.failure(HeaderMap::new(), LoginFailure::RateLimited);
+    if let Some(limit) = &bff.inner.limit {
+        match limit.allow(&parts).await {
+            Ok(true) => {}
+            Ok(false) => return bff.failure(HeaderMap::new(), LoginFailure::RateLimited),
+            Err(e) => {
+                tracing::error!(error = %e, "login limit store failed");
+                return bff.failure(HeaderMap::new(), LoginFailure::Internal);
+            }
+        }
     }
     match start(&bff, &parts.uri).await {
         Ok(res) => no_store(res),
