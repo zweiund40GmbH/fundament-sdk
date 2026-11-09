@@ -4,9 +4,10 @@
 
 use super::outbox::{InvalidEvent, OutboxEvent, WriteEventError};
 use super::{InvalidType, SourceTables};
+use crate::StoreErrorKind;
 use crate::feed_source::is_valid_type;
 use crate::protocol::feed::is_uuid;
-use crate::sql::{ER_DUP_ENTRY, db, error_number};
+use crate::sql::db;
 use serde_json::Value;
 use sqlx::{MySql, Transaction};
 
@@ -95,11 +96,12 @@ impl OutboxWriter {
         .await
         .map_err(|e| {
             // The only unique key an insert can hit is the version key (`id` is generated, `cursor`
-            // is `NULL`).
-            if error_number(&e) == Some(ER_DUP_ENTRY) {
+            // is `NULL`), so a conflict is an existing version.
+            let e = db(e);
+            if e.kind() == StoreErrorKind::Conflict {
                 WriteEventError::VersionExists
             } else {
-                WriteEventError::Store(db(e))
+                WriteEventError::Store(e)
             }
         })?;
         Ok(())

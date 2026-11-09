@@ -5,11 +5,7 @@ use super::*;
 use sqlx::{Executor, MySqlPool};
 
 #[test]
-fn numbers_and_connection_errors() {
-    assert_eq!(kind_of_number(1213), StoreErrorKind::Retryable);
-    assert_eq!(kind_of_number(1205), StoreErrorKind::Retryable);
-    assert_eq!(kind_of_number(1062), StoreErrorKind::Conflict);
-    assert_eq!(kind_of_number(1146), StoreErrorKind::Other);
+fn connection_errors() {
     let io = sqlx::Error::Io(std::io::Error::from(std::io::ErrorKind::ConnectionReset));
     assert!(db(io).is_retryable());
     assert!(db(sqlx::Error::PoolTimedOut).is_retryable());
@@ -67,7 +63,7 @@ async fn duplicate_key_and_lock_wait_timeout() {
     with_table("store_error_kinds", |pool| async move {
         pool.execute("INSERT INTO t VALUES (1)").await.unwrap();
         let dup = pool.execute("INSERT INTO t VALUES (1)").await.unwrap_err();
-        assert_eq!(error_number(&dup), Some(ER_DUP_ENTRY));
+        assert_eq!(error_number(&dup), Some(1062));
         assert_eq!(db(dup).kind(), StoreErrorKind::Conflict);
 
         // A holds the row lock; B waits at most one second for it.
@@ -84,7 +80,7 @@ async fn duplicate_key_and_lock_wait_timeout() {
             .execute("UPDATE t SET id = 2 WHERE id = 1")
             .await
             .unwrap_err();
-        assert_eq!(error_number(&wait), Some(ER_LOCK_WAIT_TIMEOUT));
+        assert_eq!(error_number(&wait), Some(1205));
         assert!(db(wait).is_retryable());
         a.rollback().await.unwrap();
     })

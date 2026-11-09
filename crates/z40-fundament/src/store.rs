@@ -18,6 +18,21 @@ pub enum StoreErrorKind {
     Other,
 }
 
+impl StoreErrorKind {
+    /// The kind of a MariaDB/MySQL server error code, for stores that classify their own driver
+    /// errors (with [`StoreError::with_kind`]): deadlock (1213) and lock wait timeout (1205) are
+    /// [`Retryable`](StoreErrorKind::Retryable), a duplicate key (1062) is a
+    /// [`Conflict`](StoreErrorKind::Conflict), anything else is [`Other`](StoreErrorKind::Other).
+    /// Connection errors carry no server code; classify them as retryable yourself.
+    pub fn from_mysql_code(code: u16) -> Self {
+        match code {
+            1213 | 1205 => StoreErrorKind::Retryable,
+            1062 => StoreErrorKind::Conflict,
+            _ => StoreErrorKind::Other,
+        }
+    }
+}
+
 /// A failure of the app's storage. Wraps the original error and its [`StoreErrorKind`]; it is returned
 /// to the app, never sent over the wire. `Display` and `source` are those of the wrapped error.
 pub struct StoreError {
@@ -92,5 +107,22 @@ mod tests {
         let c = StoreError::with_kind(StoreErrorKind::Conflict, std::io::Error::other("x"));
         assert!(!c.is_retryable());
         assert!(format!("{c:?}").contains("Conflict"));
+    }
+
+    #[test]
+    fn mysql_codes() {
+        assert_eq!(
+            StoreErrorKind::from_mysql_code(1213),
+            StoreErrorKind::Retryable
+        );
+        assert_eq!(
+            StoreErrorKind::from_mysql_code(1205),
+            StoreErrorKind::Retryable
+        );
+        assert_eq!(
+            StoreErrorKind::from_mysql_code(1062),
+            StoreErrorKind::Conflict
+        );
+        assert_eq!(StoreErrorKind::from_mysql_code(1146), StoreErrorKind::Other);
     }
 }

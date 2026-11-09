@@ -33,38 +33,21 @@ pub(crate) fn check_names(names: &[&str]) -> Result<(), InvalidTableName> {
         .ok_or(InvalidTableName)
 }
 
-/// MariaDB/MySQL error number of a duplicate key.
-pub(crate) const ER_DUP_ENTRY: u16 = 1062;
-/// MariaDB/MySQL error number of a lock wait timeout.
-const ER_LOCK_WAIT_TIMEOUT: u16 = 1205;
-/// MariaDB/MySQL error number of a deadlock.
-const ER_LOCK_DEADLOCK: u16 = 1213;
-
-/// The kind of a server error number: deadlock and lock wait timeout are retryable (the transaction
-/// was rolled back or may be run again), a duplicate key is a conflict.
-fn kind_of_number(number: u16) -> StoreErrorKind {
-    match number {
-        ER_LOCK_DEADLOCK | ER_LOCK_WAIT_TIMEOUT => StoreErrorKind::Retryable,
-        ER_DUP_ENTRY => StoreErrorKind::Conflict,
-        _ => StoreErrorKind::Other,
-    }
-}
-
 /// The MariaDB/MySQL error number of `e`, if the server answered with an error.
-pub(crate) fn error_number(e: &sqlx::Error) -> Option<u16> {
+fn error_number(e: &sqlx::Error) -> Option<u16> {
     e.as_database_error()
         .and_then(|d| d.try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>())
         .map(|m| m.number())
 }
 
-/// The kind of a database error: server errors by number; I/O errors (lost or refused connection),
-/// a pool timeout and a crashed connection worker are retryable.
+/// The kind of a database error: server errors by number ([`StoreErrorKind::from_mysql_code`]); I/O
+/// errors (lost or refused connection), a pool timeout and a crashed connection worker are retryable.
 fn kind_of(e: &sqlx::Error) -> StoreErrorKind {
     match e {
         sqlx::Error::Io(_) | sqlx::Error::PoolTimedOut | sqlx::Error::WorkerCrashed => {
             StoreErrorKind::Retryable
         }
-        _ => error_number(e).map_or(StoreErrorKind::Other, kind_of_number),
+        _ => error_number(e).map_or(StoreErrorKind::Other, StoreErrorKind::from_mysql_code),
     }
 }
 

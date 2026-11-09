@@ -59,7 +59,8 @@ impl MySqlSource {
 impl SourceStatusStore for MySqlSource {
     /// Two queries per known type over the indexes `(type, cursor)` and `(type, occurred_at)`. The
     /// windows end at the database clock (`UTC_TIMESTAMP`), the clock of events written without an
-    /// explicit time, not at `now`: app and database clocks may differ.
+    /// explicit time, not at `now` (ignored here; the trait keeps it for other stores): app and
+    /// database clocks may differ.
     async fn offer_figures(&self, _now: DateTime<Utc>) -> Result<Vec<OfferFigures>, StoreError> {
         let mut out = Vec::with_capacity(self.writer.types.len());
         for record_type in &self.writer.types {
