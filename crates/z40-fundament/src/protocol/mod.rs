@@ -2,8 +2,10 @@
 //! status level. Pure types and rules without IO, always compiled; the features build on them.
 //!
 //! * [`feed`] – feed events and pages, page validation, version rule
+//! * [`status`] – the status document and its lenient, checked reading
 
 pub mod feed;
+pub mod status;
 
 use chrono::{DateTime, SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};

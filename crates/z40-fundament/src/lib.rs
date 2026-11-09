@@ -7,7 +7,8 @@
 //!
 //! Always available (no feature):
 //!
-//! * [`protocol`] – wire types of the feed and the status level, page validation, version rule
+//! * [`protocol`] – wire types of the feed and the status document, page validation, version rule,
+//!   checked reading of a status document
 //! * [`fields`] – pure field helpers for mappings (`text_field`)
 //! * [`health`] – health rule of a consumed source and the events on change
 //! * [`config`] – `from_lookup` configuration helpers and the generated reference

@@ -21,7 +21,7 @@ Ready-made MariaDB/MySQL implementations live behind their own feature. The seco
 
 | Feature | What it gives you |
 |---|---|
-| *(none)* | Wire types of the feed and the status level, page validation, version rule, health rule, `from_lookup` config helpers, `SecretString`, `StoreError` with `StoreErrorKind` (`Retryable`, `Conflict`, `Other`) |
+| *(none)* | Wire types of the feed and the status document (`StatusDocument::from_json`: lenient, checked reading), page validation, version rule, health rule, `from_lookup` config helpers, `SecretString`, `StoreError` with `StoreErrorKind` (`Retryable`, `Conflict`, `Other`) |
 | `credentials` | Static service keys: verify incoming bearer keys against a `name=sha256hex` list in constant time, a per-address failure brake, an outgoing bearer key |
 | `feed-consumer` | `FeedConsumer`: reads a feed page by page (`run_once`), with the traits `RunLock`, `CursorStore` and `PageSink` the app implements; `slot_for` for UTC scheduling |
 | `replica` | Local replica of feed records: `Mapping` (which fields you keep), `ReplicaStore`, the `Replica` adapter (version rule, tombstones) |

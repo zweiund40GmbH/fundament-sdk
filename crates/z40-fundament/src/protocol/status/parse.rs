@@ -1,12 +1,12 @@
 //! Reading a status document of another app (`docs/protocol.md` §3.3). The answer is untrusted: it must
 //! be JSON of the document shape with valid required fields (`app`, the levels, the names and kinds of
 //! the list entries, RFC 3339 times, non-negative figures); anything else rejects the whole answer.
-//! Unknown fields and missing optional parts are accepted (see [`super::document`]).
+//! Unknown fields and missing optional parts are accepted (see [`super`]).
 //!
 //! Texts are only checked for their type: show them as data (encode for the output), never interpret
-//! them. List sizes are bounded by the body limit of the client.
+//! them. Bound the size of the body before parsing (the status client allows 256 KiB).
 
-use super::document::{Offer, StatusDocument};
+use super::{Offer, StatusDocument};
 use chrono::DateTime;
 
 /// The body is not a valid status document. Carries nothing of the body (a field name at most), so it

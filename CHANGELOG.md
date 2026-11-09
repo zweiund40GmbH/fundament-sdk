@@ -12,6 +12,9 @@ All notable changes to this project are documented in this file. The format is b
   `StoreError::is_retryable()` and `StoreError::with_kind(kind, error)`. The MariaDB/MySQL implementations
   classify their errors: deadlock (1213), lock wait timeout (1205), I/O errors, pool timeout and a crashed
   connection worker are retryable, a duplicate key (1062) is a conflict. No sqlx type in the public API.
+- `z40-fundament`, no feature: the status document types and `StatusDocument::from_json` (with
+  `InvalidDocument`) live in `protocol::status` and need no feature; `status::document`, `status::StatusDocument`
+  and the other old paths stay as re-exports. `status::InvalidDocument` is now also exported with `status`.
 - `z40-fundament`, feature `feed-source-mysql`: `OutboxWriter::new(tables, types)` with
   `write(&mut tx, &event)` writes outbox events without a pool (same checks and `VersionExists` as before);
   `MySqlSource::write_event` delegates to it, `MySqlSource::writer()` returns it.
