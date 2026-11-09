@@ -29,7 +29,7 @@ helpers of [`z40-fundament`](https://crates.io/crates/z40-fundament).
 
 ```toml
 [dependencies]
-z40-fundament-http = { version = "0.5", features = ["request-id", "trace", "telemetry"] }
+z40-fundament-http = { version = "0.6", features = ["request-id", "trace", "telemetry"] }
 ```
 
 ```rust,ignore
@@ -83,7 +83,7 @@ session cookie.
 
 ```toml
 [dependencies]
-z40-fundament-http = { version = "0.5", features = ["bff-mysql"] }
+z40-fundament-http = { version = "0.6", features = ["bff-mysql"] }
 ```
 
 ```rust,ignore

@@ -38,7 +38,7 @@ Planned: caching, GraphQL helpers and token credentials.
 
 ```toml
 [dependencies]
-z40-fundament-http = { version = "0.5", features = ["request-id", "trace", "telemetry"] }
+z40-fundament-http = { version = "0.6", features = ["request-id", "trace", "telemetry"] }
 ```
 
 | Feature | What it gives you |
@@ -57,7 +57,7 @@ Usage and layer order: [crate README](https://github.com/zweiund40GmbH/fundament
 
 ```toml
 [dependencies]
-z40-fundament = { version = "0.5", features = ["replica-mysql"] }
+z40-fundament = { version = "0.6", features = ["replica-mysql"] }
 ```
 
 1. Copy [`schema/mysql.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql.sql) into a migration of your app (add your
@@ -97,7 +97,7 @@ certificate from a private CA works once that CA is in the platform store or in 
 
 ```toml
 [dependencies]
-z40-fundament = { version = "0.5", features = ["feed-source-mysql", "status"] }
+z40-fundament = { version = "0.6", features = ["feed-source-mysql", "status"] }
 ```
 
 1. Copy [`schema/mysql-source.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql-source.sql) into a migration of your
@@ -168,7 +168,7 @@ dodge the brake. Without any address all clients share one brake (a warning is l
 
 ```toml
 [dependencies]
-z40-fundament = { version = "0.5", features = ["status-client"] }
+z40-fundament = { version = "0.6", features = ["status-client"] }
 ```
 
 ```rust,ignore

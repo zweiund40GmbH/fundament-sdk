@@ -2592,7 +2592,7 @@ dependencies = [
 
 [[package]]
 name = "z40-fundament"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "axum",
  "chrono",
@@ -2611,7 +2611,7 @@ dependencies = [
 
 [[package]]
 name = "z40-fundament-http"
-version = "0.5.0"
+version = "0.6.0"
 dependencies = [
  "aws-lc-rs",
  "axum",
