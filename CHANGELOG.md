@@ -43,8 +43,9 @@ All notable changes to this project are documented in this file. The format is b
   `feed_source`.
 - `z40-fundament`, feature `status-client`: `StatusPoller` holds one HTTP client for many targets:
   `StatusPoller::new()`, `fetch(&target, &key)` and `poll_all(&targets, &keys, concurrency)`; the free
-  `poll_all` uses a new poller per call. `StatusPoller::plain_http_for_tests()` and
-  `StatusTarget::plain_http_for_tests(app, origin)` for loopback servers in tests.
+  `poll_all` uses a new poller per call. With the test-only feature `test-util` also
+  `StatusPoller::plain_http_for_tests()` and `StatusTarget::plain_http_for_tests(app, origin)` for loopback
+  servers in tests.
 - `z40-fundament`, feature `test-util`: `test_util::key(n)`, `test_util::FeedPageBuilder` (consistent feed
   pages, also as JSON) and `test_util::status_document(app, level)`.
 - `z40-fundament-http`: `TrustedProxies::client_ip`, `resolver()`, the `ClientIp` extractor and the default

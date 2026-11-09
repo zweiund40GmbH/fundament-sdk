@@ -34,7 +34,8 @@ status-client = ["credentials", "dep:reqwest", "dep:webpki-root-certs", "dep:tra
 feed-source = ["credentials", "dep:axum", "axum/query", "dep:tokio", "tokio/rt", "dep:tracing"]
 # Ready-made MariaDB/MySQL (sqlx) outbox, cursor assigner, retention and poll log for `feed-source`.
 feed-source-mysql = ["feed-source", "dep:sqlx"]
-# Helpers for the tests of apps (record keys, feed page builder, status document); for dev-dependencies.
+# Helpers for the tests of apps (record keys, feed page builder, status document; with `status-client` also
+# `StatusPoller::plain_http_for_tests` and `StatusTarget::plain_http_for_tests`); for dev-dependencies.
 test-util = []
 
 [dependencies]

@@ -76,7 +76,10 @@ impl StatusTarget {
     }
 
     /// Like [`StatusTarget::new`], but for a plain `http://` origin on a **loopback** address (a local
-    /// server in tests; poll it with [`super::StatusPoller::plain_http_for_tests`]).
+    /// server in tests; poll it with [`super::StatusPoller::plain_http_for_tests`]). Only with the
+    /// test-only feature `test-util`.
+    #[cfg(any(test, feature = "test-util"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     pub fn plain_http_for_tests(app: &str, origin: &str) -> Result<Self, StatusClientError> {
         let origin =
             http_client::loopback_http_origin(origin).ok_or(StatusClientError::InvalidUrl)?;

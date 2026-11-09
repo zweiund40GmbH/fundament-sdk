@@ -28,7 +28,10 @@ impl StatusPoller {
     }
 
     /// A poller that also accepts plain `http://` targets; only loopback targets can be built for it
-    /// ([`StatusTarget::plain_http_for_tests`]). For tests against a local server.
+    /// ([`StatusTarget::plain_http_for_tests`]). For tests against a local server; only with the
+    /// test-only feature `test-util`.
+    #[cfg(any(test, feature = "test-util"))]
+    #[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
     pub fn plain_http_for_tests() -> Result<Self, StatusClientError> {
         Ok(Self { http: http(false)? })
     }
