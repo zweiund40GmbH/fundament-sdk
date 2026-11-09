@@ -9,7 +9,8 @@
 //! and block new logins for everyone for the rest of the window; existing sessions are unaffected. With
 //! the default resolver behind a reverse proxy every user shares the proxy's counter (warned once).
 //!
-//! IPv6 addresses count by their /64 (`brake_address`).
+//! IPv6 addresses count by their /64 (`brake_address`). Shared windows follow the clock of each instance:
+//! with clock skew between instances up to twice the limit may pass near a minute boundary.
 
 mod local;
 mod shared;

@@ -2,11 +2,20 @@
 //! `bff-mysql`), so N instances allow the configured limit, not N times it.
 //!
 //! Windows are aligned to the clock (each starts at a full minute, UTC), so every instance counts into
-//! the same window. A start first counts against its client address; only if that stays within the
-//! limit it counts against the total. A refused start may thus raise the counter that refused it, but
-//! that counter already refuses everything for the rest of its window, so the outcome equals the
-//! in-process counters (and the address counter of a start refused by the total is not visible either:
-//! the total refuses every start of that window).
+//! the same window. A start first **reads** the total: once it is used up, the start is refused without
+//! writing anything, so a flood from many addresses cannot create a row per address. Otherwise the start
+//! counts against its client address and, only if that stays within the limit, against the total. A
+//! start refused per address thus raises the counter that refused it, but that counter already refuses
+//! everything for the rest of its window, so the outcome equals the in-process counters.
+//!
+//! Residual race: starts that read the total concurrently, just before it is used up, all pass the read
+//! and each write their address counter; the extra rows are bounded by the starts in flight at that
+//! moment, not by the length of the flood.
+//!
+//! Each instance takes the window from its own clock. If the clocks of the instances differ, near a
+//! minute boundary some instances already count into the next window while others still count into the
+//! current one, so for up to the clock difference up to twice the limit may pass. Keep the clocks in
+//! sync (NTP).
 
 use super::WINDOW;
 use crate::bff::store::BoxFuture;
@@ -18,8 +27,12 @@ use z40_fundament::StoreError;
 
 /// Counters of the login limit shared by the instances of an app ([`super::super::BffBuilder::login_limit_store`]).
 ///
-/// A key is the SHA-256 of `total` or of the client address (IPv6 reduced to its /64), never the
+/// A key is the SHA-256 of `total` or a hash of the client address (IPv6 reduced to its /64), never the
 /// address itself.
+///
+/// Windows come from the clock of each instance (not the store's): if the clocks of the instances
+/// differ, near a minute boundary some count into the next window while others still count into the
+/// current one, so for up to the clock difference up to twice the limit may pass. Keep them in sync.
 pub trait LoginLimitStore: Send + Sync + 'static {
     /// Adds one to counter `key` in the window `window_start` (a full minute, UTC) and returns the count
     /// after it. Must be atomic: of concurrent calls each gets a different count. The counter is no
@@ -29,6 +42,14 @@ pub trait LoginLimitStore: Send + Sync + 'static {
         key: &TokenHash,
         window_start: DateTime<Utc>,
         window_end: DateTime<Utc>,
+    ) -> impl Future<Output = Result<u64, StoreError>> + Send;
+
+    /// The current count of counter `key` in the window `window_start`, without changing it (0 if the
+    /// counter does not exist). Used to refuse starts once the total is used up without writing a row.
+    fn count(
+        &self,
+        key: &TokenHash,
+        window_start: DateTime<Utc>,
     ) -> impl Future<Output = Result<u64, StoreError>> + Send;
 }
 
@@ -40,6 +61,7 @@ pub(crate) trait DynLimitStore: Send + Sync {
         start: DateTime<Utc>,
         end: DateTime<Utc>,
     ) -> BoxFuture<'a, u64>;
+    fn count<'a>(&'a self, key: &'a TokenHash, start: DateTime<Utc>) -> BoxFuture<'a, u64>;
 }
 
 impl<S: LoginLimitStore> DynLimitStore for S {
@@ -50,6 +72,10 @@ impl<S: LoginLimitStore> DynLimitStore for S {
         end: DateTime<Utc>,
     ) -> BoxFuture<'a, u64> {
         Box::pin(LoginLimitStore::increment(self, key, start, end))
+    }
+
+    fn count<'a>(&'a self, key: &'a TokenHash, start: DateTime<Utc>) -> BoxFuture<'a, u64> {
+        Box::pin(LoginLimitStore::count(self, key, start))
     }
 }
 
@@ -71,11 +97,14 @@ pub(super) async fn allow_at(
 ) -> Result<bool, StoreError> {
     let start = window_start(now);
     let end = start + TimeDelta::seconds(WINDOW.as_secs() as i64);
+    let all = TokenHash::of("total");
+    if store.count(&all, start).await? >= u64::from(total) {
+        return Ok(false);
+    }
     let address = TokenHash::of(&format!("ip:{ip}"));
     if store.increment(&address, start, end).await? > u64::from(per_ip) {
         return Ok(false);
     }
-    let all = TokenHash::of("total");
     Ok(store.increment(&all, start, end).await? <= u64::from(total))
 }
 
@@ -110,6 +139,14 @@ mod tests {
             let n = c.entry((*key.as_bytes(), start)).or_default();
             *n += 1;
             Ok(*n)
+        }
+
+        async fn count(&self, key: &TokenHash, start: DateTime<Utc>) -> Result<u64, StoreError> {
+            if self.fail {
+                return Err(StoreError::new(std::io::Error::other("down")));
+            }
+            let c = self.counts.lock().unwrap();
+            Ok(c.get(&(*key.as_bytes(), start)).copied().unwrap_or(0))
         }
     }
 
@@ -147,7 +184,29 @@ mod tests {
             "next window"
         );
         let keys = m.counts.lock().unwrap().len();
-        assert_eq!(keys, 5 + 2, "addresses and totals of two windows");
+        assert_eq!(keys, 3 + 2, "refused by the total: no row; two windows");
+    }
+
+    #[tokio::test]
+    async fn refused_by_the_total_writes_nothing() {
+        let m = Memory::default();
+        let t = at(1_800_000_000);
+        for i in 0..3 {
+            assert!(
+                allow_at(&m, ip(&format!("192.0.2.{i}")), 5, 3, t)
+                    .await
+                    .unwrap()
+            );
+        }
+        for i in 0..50 {
+            let a = ip(&format!("198.51.100.{i}"));
+            assert!(!allow_at(&m, a, 5, 3, t).await.unwrap());
+        }
+        assert_eq!(
+            m.counts.lock().unwrap().len(),
+            3 + 1,
+            "addresses and the total"
+        );
     }
 
     #[tokio::test]

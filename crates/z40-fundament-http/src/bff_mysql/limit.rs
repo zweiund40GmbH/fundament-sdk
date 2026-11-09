@@ -78,4 +78,18 @@ impl LoginLimitStore for MySqlLoginLimitStore {
         tx.commit().await.map_err(db)?;
         Ok(count)
     }
+
+    /// A plain read of the row (0 when there is none); takes no lock.
+    async fn count(&self, key: &TokenHash, window_start: DateTime<Utc>) -> Result<u64, StoreError> {
+        let count: Option<u64> =
+            sqlx::query_scalar(self.tables.sql(
+                "SELECT `count` FROM {login_limit} WHERE `key_hash` = ? AND `window_start` = ?",
+            ))
+            .bind(&key.as_bytes()[..])
+            .bind(window_start.naive_utc().trunc_subsecs(0))
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(db)?;
+        Ok(count.unwrap_or(0))
+    }
 }

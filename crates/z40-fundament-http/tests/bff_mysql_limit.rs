@@ -77,10 +77,11 @@ async fn login_limit_total_is_shared_by_instances() {
                 refused,
                 (StatusCode::TOO_MANY_REQUESTS, Some("60".to_owned()))
             );
-            assert_eq!(
-                start(&a, "192.0.2.10").await.0,
-                StatusCode::TOO_MANY_REQUESTS
-            );
+            for i in 0..50 {
+                let app = if i % 2 == 0 { &a } else { &b };
+                let ip = format!("198.51.100.{i}");
+                assert_eq!(start(app, &ip).await.0, StatusCode::TOO_MANY_REQUESTS);
+            }
             assert_eq!(
                 count(&pool, "app_bff_login").await,
                 3,
@@ -92,7 +93,11 @@ async fn login_limit_total_is_shared_by_instances() {
                     .fetch_all(&pool)
                     .await
                     .unwrap();
-            assert_eq!(rows.len(), 3 + 2 + 1, "five addresses and the total");
+            assert_eq!(
+                rows.len(),
+                3 + 1,
+                "three addresses and the total; refused by the total: no row"
+            );
             assert!(rows.iter().all(|(k, _)| k.len() == 32), "only hashes");
             let limits = MySqlSessionStore::new(pool.clone(), tables()).login_limit_store();
             assert_eq!(
@@ -101,7 +106,7 @@ async fn login_limit_total_is_shared_by_instances() {
                 "window still open"
             );
             let later = Utc::now() + TimeDelta::seconds(61);
-            assert_eq!(limits.delete_expired(later).await.unwrap(), 6);
+            assert_eq!(limits.delete_expired(later).await.unwrap(), 4);
         },
     )
     .await;
@@ -173,8 +178,11 @@ async fn concurrent_increments_each_get_their_own_count() {
             }
             counts.sort_unstable();
             assert_eq!(counts, (1..=20).collect::<Vec<u64>>());
+            assert_eq!(limits.count(&key, start).await.unwrap(), 20, "read");
             let other = limits.increment(&key, end, end + TimeDelta::seconds(60));
             assert_eq!(other.await.unwrap(), 1, "next window starts at 1");
+            let unused = start - TimeDelta::seconds(60);
+            assert_eq!(limits.count(&key, unused).await.unwrap(), 0, "no row");
         },
     )
     .await;
