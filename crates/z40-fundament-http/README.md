@@ -44,6 +44,9 @@ let env = |k: &str| std::env::var(k).ok();
 TelemetryConfig::from_lookup("APP", env)?.init()?;      // APP_LOG (else RUST_LOG, else info), APP_LOG_FORMAT
 let proxies = TrustedProxies::from_lookup("APP", env)?; // APP_TRUSTED_PROXIES
 
+// The `ClientIp` extractor takes the proxies from the router state (`AppState` holds `proxies`):
+impl axum::extract::FromRef<AppState> for TrustedProxies { fn from_ref(s: &AppState) -> Self { s.proxies.clone() } }
+
 // The last `layer` call runs first: request id → trace → headers → no-store → CSRF → routes.
 let app = routes
     .layer(Csrf::header("x-requested-with", "crm")?.protect_prefix("/api/").exempt_path("/api/webhook"))
@@ -54,9 +57,10 @@ let app = routes
 axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await?;
 ```
 
-- **Client address:** `ClientIp` is an extractor (`TrustedProxies` in the state via `FromRef`);
+- **Client address:** `ClientIp` is an extractor (`TrustedProxies` in the state via the `FromRef` impl above);
   `proxies.resolver()` is the `client_ip` function for `StatusEndpoint` and `FeedEndpoint` of
-  `z40-fundament`, so their failure brake sees the same address.
+  `z40-fundament`, so their failure brake sees the same address. Router tests without a server add
+  `.layer(axum::extract::connect_info::MockConnectInfo(addr))`; both honour it.
 - **CSRF answer:** `403 {"code":"CSRF","message":"Anfrage abgelehnt (CSRF-Schutz). Bitte laden Sie die Seite
   neu."}` – the error form and German fixed texts of the `z40-fundament` endpoints. Apps with their own error
   shape pass `.rejection(|| …)`; apps with another check (e.g. a double-submit cookie) use `Csrf::check(…)`.

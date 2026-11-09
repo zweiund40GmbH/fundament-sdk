@@ -12,10 +12,9 @@
 //! is still full, new addresses are only held by the total limit. IPv6 addresses count by their /64
 //! (`brake_address`).
 
-use axum::extract::ConnectInfo;
 use axum::http::request::Parts;
 use std::collections::HashMap;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, PoisonError};
 use std::time::{Duration, Instant};
@@ -29,14 +28,9 @@ const MAX_TRACKED: usize = 10_000;
 /// Resolves the client address of a request, e.g. `TrustedProxies::resolver()`.
 pub type ClientIpFn = Arc<dyn Fn(&Parts) -> Option<IpAddr> + Send + Sync>;
 
-/// The default resolver: the TCP peer from `ConnectInfo<SocketAddr>`.
+/// The default resolver: the TCP peer from `ConnectInfo<SocketAddr>` (or `MockConnectInfo` in tests).
 pub(crate) fn connect_info() -> ClientIpFn {
-    Arc::new(|parts: &Parts| {
-        parts
-            .extensions
-            .get::<ConnectInfo<SocketAddr>>()
-            .map(|c| c.0.ip())
-    })
+    Arc::new(crate::client_ip::peer)
 }
 
 /// Starts in one window.
@@ -175,6 +169,9 @@ impl LoginLimit {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::extract::ConnectInfo;
+    use axum::extract::connect_info::MockConnectInfo;
+    use std::net::SocketAddr;
 
     fn ip(s: &str) -> IpAddr {
         s.parse().unwrap()
@@ -256,6 +253,10 @@ mod tests {
         assert!(!l.warned_proxy_peer.load(Ordering::Relaxed), "public peer");
         assert!(l.allow(&from_peer("10.0.0.1")));
         assert!(l.warned_proxy_peer.load(Ordering::Relaxed));
+        let mut mocked = axum::http::Request::new(()).into_parts().0;
+        let peer: SocketAddr = "10.0.0.2:443".parse().unwrap();
+        mocked.extensions.insert(MockConnectInfo(peer));
+        assert_eq!(connect_info()(&mocked), Some(peer.ip()), "router tests");
         let explicit = LoginLimit::new(100, 100, Some(connect_info()));
         assert!(explicit.allow(&from_peer("10.0.0.1")));
         assert!(

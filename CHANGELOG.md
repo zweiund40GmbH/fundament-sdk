@@ -12,6 +12,12 @@ All notable changes to this project are documented in this file. The format is b
   inner service to be `Clone`. Migration: none for axum apps (`Router::layer` already requires it); a
   hand-built tower stack wraps a non-`Clone` service in `tower::buffer::Buffer` first.
 
+### Added
+
+- `z40-fundament-http`: `TrustedProxies::client_ip`, `resolver()`, the `ClientIp` extractor and the default
+  client address of the `bff` login limit also take the peer from axum's `MockConnectInfo<SocketAddr>` (router
+  tests without a server); a real `ConnectInfo` wins. The README shows the `FromRef` impl for `ClientIp`.
+
 ### Fixed
 
 - `z40-fundament-http`: a request a layer answers itself (e.g. refused by `Csrf`) no longer keeps the

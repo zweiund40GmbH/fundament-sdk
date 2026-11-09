@@ -8,7 +8,8 @@
 //! one comma-separated list. The standard `Forwarded` header is not read.
 //!
 //! Serve the app with `into_make_service_with_connect_info::<SocketAddr>()`, otherwise the peer is
-//! unknown.
+//! unknown. In router tests without a server, axum's `MockConnectInfo<SocketAddr>` layer provides the
+//! peer instead (a real `ConnectInfo` wins when both are present).
 //!
 //! The endpoints of `z40-fundament` take the resolver as their `client_ip` function, so their failure
 //! brake sees the same address as the app's own limits:
@@ -25,6 +26,7 @@
 
 mod net;
 
+use axum::extract::connect_info::MockConnectInfo;
 use axum::extract::{ConnectInfo, FromRef, FromRequestParts};
 use axum::http::HeaderMap;
 use axum::http::request::Parts;
@@ -117,10 +119,11 @@ impl TrustedProxies {
         client
     }
 
-    /// The client address of a request: the peer from `ConnectInfo<SocketAddr>`, replaced via
-    /// `X-Forwarded-For` only behind a trusted proxy. `None` without `ConnectInfo`.
+    /// The client address of a request: the peer from `ConnectInfo<SocketAddr>` (or axum's
+    /// `MockConnectInfo<SocketAddr>` in tests), replaced via `X-Forwarded-For` only behind a trusted
+    /// proxy. `None` without either.
     pub fn client_ip(&self, parts: &Parts) -> Option<IpAddr> {
-        let peer = parts.extensions.get::<ConnectInfo<SocketAddr>>()?.0.ip();
+        let peer = peer(parts)?;
         Some(self.client(peer, forwarded_for(&parts.headers).as_deref()))
     }
 
@@ -129,6 +132,18 @@ impl TrustedProxies {
     pub fn resolver(&self) -> impl Fn(&Parts) -> Option<IpAddr> + Send + Sync + 'static {
         let proxies = self.clone();
         move |parts: &Parts| proxies.client_ip(parts)
+    }
+}
+
+/// The TCP peer of a request: `ConnectInfo<SocketAddr>`, else `MockConnectInfo<SocketAddr>` (set only by
+/// the app's own test layer, never by a client), as axum's `ConnectInfo` extractor does.
+pub(crate) fn peer(parts: &Parts) -> Option<IpAddr> {
+    let ext = &parts.extensions;
+    match ext.get::<ConnectInfo<SocketAddr>>() {
+        Some(ConnectInfo(addr)) => Some(addr.ip()),
+        None => ext
+            .get::<MockConnectInfo<SocketAddr>>()
+            .map(|MockConnectInfo(addr)| addr.ip()),
     }
 }
 
