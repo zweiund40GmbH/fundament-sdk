@@ -126,7 +126,7 @@ let app = Router::new()
   does not reveal it and no server key is needed. No ID, access or refresh token is kept.
 - **Cookies:** `__Host-<name>_sid` (`HttpOnly; Secure; Path=/`, `SameSite=Strict` or `Lax`) and
   `__Host-<name>_login` (10 minutes, `SameSite=Lax`, single use). Only a plain-HTTP loopback redirect URI
-  (local development) drops `Secure` and the prefix.
+  (local development, see *Settings*) drops `Secure` and the prefix.
 - **Rotation:** every login gets a new 256-bit session id; the session of the cookie the browser brought is
   deleted.
 - **Lifetime:** idle and absolute timeout (`<PREFIX>_SESSION_IDLE_SECS`, `<PREFIX>_SESSION_MAX_SECS`); the
@@ -150,7 +150,20 @@ let app = Router::new()
   address all share one counter (warned once). `.without_login_limit()` if the app limits it itself.
   Residual risk: a flood from many /64s can use up the total and block new logins for everyone for the rest
   of the minute (existing sessions are unaffected); counters are per instance (N instances → N× limit).
-- **Settings:** `BffConfig` is built with `from_lookup` or `BffConfig::new`; `build()` checks the URLs again.
+- **Settings:** `BffConfig` is built with `from_lookup`, `from_lookup_with` or `BffConfig::new`; `build()`
+  checks the URLs again. URLs are `https://`; plain-HTTP loopback URLs (`http://localhost:…`) are refused
+  unless the app allows them for development, and defaults it computes (client id, redirect URIs from its
+  public URL) go into `Defaults`:
+
+  ```rust,ignore
+  let config = BffConfig::from_lookup_with("AUTH", env, Defaults {
+      client_id: Some("crm".into()),
+      redirect_uri: Some(format!("{public_url}/api/auth/callback")),
+      post_logout_redirect_uri: Some(format!("{public_url}/")),
+      allow_loopback_http: app_env == "development",   // never a constant `true`
+  })?;
+  // or: BffConfig::new(issuer, client_id, secret, redirect_uri)?.allow_loopback_http(app_env == "development")
+  ```
 
 Variables: [`docs/configuration.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/docs/configuration.md).
 

@@ -91,9 +91,10 @@ mod session;
 mod store;
 pub mod timeouts;
 pub mod token;
+mod urls;
 
 pub use builder::BffBuilder;
-pub use config::{BffConfig, InvalidUrl};
+pub use config::{BffConfig, Defaults, InvalidUrl};
 pub use cookies::SameSite;
 pub use limit::ClientIpFn;
 pub use page::{LoginDenied, LoginFailure};

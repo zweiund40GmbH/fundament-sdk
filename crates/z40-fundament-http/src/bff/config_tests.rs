@@ -80,33 +80,112 @@ fn required_values_and_bad_values_are_refused() {
 }
 
 #[test]
-fn plain_http_only_on_loopback_and_then_without_secure_cookies() {
-    let c = with(&[
+fn plain_http_only_on_loopback_when_allowed_and_then_without_secure_cookies() {
+    let local = [
         ("AUTH_ISSUER", "http://127.0.0.1:8400"),
         ("AUTH_REDIRECT_URI", "http://localhost:3000/auth/callback"),
-    ])
-    .unwrap();
-    assert!(!c.secure_cookies());
+    ];
+    let err = with(&local).unwrap_err();
+    assert_eq!(
+        (err.name.as_str(), &err.kind),
+        ("AUTH_ISSUER", &ConfigErrorKind::InvalidUrl)
+    );
+    let err = with(&local[1..]).unwrap_err();
+    assert_eq!(err.name, "AUTH_REDIRECT_URI", "refused by default");
+    let mut all: Vec<(&str, &str)> = BASE.to_vec();
+    all.retain(|(k, _)| !local.iter().any(|(e, _)| e == k));
+    all.extend_from_slice(&local);
+    let dev = Defaults {
+        allow_loopback_http: true,
+        ..Defaults::default()
+    };
+    let c = BffConfig::from_lookup_with("AUTH", env(&all), dev).unwrap();
+    assert!(c.allow_loopback_http && !c.secure_cookies());
+    assert_eq!(c.check(), Ok(()));
+    let c = c.allow_loopback_http(false);
+    assert_eq!(
+        c.check(),
+        Err(InvalidUrl("issuer")),
+        "checked again at build"
+    );
     for ok in [
         "https://a.example",
         "http://localhost:1/x",
         "http://[::1]/",
         "http://127.0.0.2/",
     ] {
-        assert_eq!(check_url(ok), Ok(()), "{ok}");
+        assert_eq!(check_url(ok, true), Ok(()), "{ok}");
+        assert_eq!(
+            check_url(ok, false).is_ok(),
+            ok.starts_with("https:"),
+            "{ok}"
+        );
     }
     for bad in [
         "http://a.example/",
         "http://localhost.example.com/",
+        "http://127.example/",
         "https://user:pw@a.example/",
+        "http://user@localhost/",
         "https://a.example/#x",
         "ftp://localhost/",
         "javascript:alert(1)",
         "/relative",
         "https://",
     ] {
-        assert!(check_url(bad).is_err(), "{bad}");
+        assert!(check_url(bad, true).is_err(), "{bad}");
     }
+}
+
+#[test]
+fn app_defaults_fill_unset_variables() {
+    let defaults = || Defaults {
+        client_id: Some("crm".into()),
+        redirect_uri: Some("https://crm.example.com/api/auth/callback".into()),
+        post_logout_redirect_uri: Some("https://crm.example.com/".into()),
+        allow_loopback_http: false,
+    };
+    let only = env(&[
+        ("AUTH_ISSUER", "https://login.example.com"),
+        ("AUTH_CLIENT_SECRET", "s3cr3t"),
+    ]);
+    let c = BffConfig::from_lookup_with("AUTH", only, defaults()).unwrap();
+    assert_eq!(c.client_id, "crm");
+    assert_eq!(c.redirect_uri, "https://crm.example.com/api/auth/callback");
+    assert_eq!(
+        c.post_logout_redirect_uri.as_deref(),
+        Some("https://crm.example.com/")
+    );
+    assert!(!c.allow_loopback_http);
+    let c = BffConfig::from_lookup_with(
+        "AUTH",
+        env(&[
+            ("AUTH_ISSUER", "https://login.example.com"),
+            ("AUTH_CLIENT_SECRET", "s3cr3t"),
+            ("AUTH_CLIENT_ID", "billing"),
+            ("AUTH_REDIRECT_URI", " "),
+        ]),
+        defaults(),
+    )
+    .unwrap();
+    assert_eq!(c.client_id, "billing", "the variable wins");
+    assert_eq!(
+        c.redirect_uri, "https://crm.example.com/api/auth/callback",
+        "empty = unset"
+    );
+    let bad = Defaults {
+        redirect_uri: Some("http://crm.example.com/cb?k=s3cr3t".into()),
+        ..defaults()
+    };
+    let err = BffConfig::from_lookup_with("AUTH", env(&BASE[..3]), bad).unwrap_err();
+    assert_eq!(
+        (err.name.as_str(), &err.kind),
+        ("AUTH_REDIRECT_URI", &ConfigErrorKind::InvalidUrl)
+    );
+    assert!(!err.to_string().contains("s3cr3t"), "default never echoed");
+    let err =
+        BffConfig::from_lookup_with("AUTH", env(&BASE[2..]), Defaults::default()).unwrap_err();
+    assert_eq!(err.name, "AUTH_ISSUER", "the issuer has no default");
 }
 
 #[test]
@@ -142,6 +221,11 @@ fn login_rates_and_constructor() {
         .unwrap_err(),
         InvalidUrl("redirect_uri")
     );
+    let local =
+        BffConfig::new("http://localhost:8400", "crm", secret(), "http://[::1]/cb").unwrap();
+    assert!(!local.allow_loopback_http);
+    assert_eq!(local.check(), Err(InvalidUrl("issuer")), "refused at build");
+    assert_eq!(local.allow_loopback_http(true).check(), Ok(()));
 }
 
 #[test]

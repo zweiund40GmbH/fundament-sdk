@@ -10,7 +10,9 @@ use axum::routing::get;
 use axum::{Json, Router};
 use serde::{Deserialize, Serialize};
 use tower::ServiceExt;
-use z40_fundament_http::bff::{Bff, BffBuilder, BffConfig, LoginDenied, Session, SessionStore};
+use z40_fundament_http::bff::{
+    Bff, BffBuilder, BffConfig, Defaults, LoginDenied, Session, SessionStore,
+};
 
 /// The app's session data.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -79,7 +81,12 @@ impl<S: SessionStore + Clone> TestApp<S> {
                 .find(|(n, _)| n == k)
                 .map(|(_, v)| v.clone())
         };
-        let config = BffConfig::from_lookup("AUTH", lookup).unwrap();
+        // The fake provider runs on plain HTTP at 127.0.0.1, as in local development.
+        let dev = Defaults {
+            allow_loopback_http: true,
+            ..Defaults::default()
+        };
+        let config = BffConfig::from_lookup_with("AUTH", lookup, dev).unwrap();
         let bff = Bff::builder(config, store.clone(), |client, login| async move {
             let access = client
                 .verify_access_token(

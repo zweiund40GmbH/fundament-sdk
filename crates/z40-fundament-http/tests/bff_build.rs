@@ -8,6 +8,7 @@ use axum::http::{HeaderValue, Method, StatusCode, header};
 use axum::response::IntoResponse;
 use common::app::{TestApp, User, set_cookies, text};
 use common::memory::MemoryStore;
+use z40_fundament::SecretString;
 use z40_fundament_http::bff::{Bff, BffBuildError, BffConfig, InvalidUrl, LoginDenied};
 
 /// `GET /api/auth/login` from `ip`.
@@ -100,6 +101,31 @@ fn urls_changed_after_reading_are_refused_at_build() {
     let mut c = config();
     c.login_rate_total = 0;
     assert_eq!(build(c).unwrap_err(), BffBuildError::LoginLimit);
+}
+
+#[test]
+fn loopback_http_is_refused_at_build_unless_allowed() {
+    let local = || {
+        let secret = SecretString::new("s3cr3t");
+        BffConfig::new(
+            "http://127.0.0.1:8400",
+            "crm",
+            secret,
+            "http://localhost:3000/cb",
+        )
+        .unwrap()
+    };
+    assert_eq!(
+        build(local()).unwrap_err(),
+        BffBuildError::Url(InvalidUrl("issuer"))
+    );
+    assert!(build(local().allow_loopback_http(true)).is_ok());
+    let mut c = config().allow_loopback_http(false);
+    c.post_logout_redirect_uri = Some("http://localhost:3000/".to_owned());
+    assert_eq!(
+        build(c).unwrap_err(),
+        BffBuildError::Url(InvalidUrl("post_logout_redirect_uri"))
+    );
 }
 
 #[tokio::test]

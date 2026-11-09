@@ -1,15 +1,20 @@
 //! [`BffConfig`]: the client registration at the login provider and the session settings, read with
-//! [`BffConfig::from_lookup`]. The app chooses the prefix, so existing variable names stay: with the
-//! prefix `AUTH` the variables are `AUTH_ISSUER`, `AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET`, … .
+//! [`BffConfig::from_lookup`] (or [`BffConfig::from_lookup_with`] for defaults the app computes). The
+//! app chooses the prefix, so existing variable names stay: with the prefix `AUTH` the variables are
+//! `AUTH_ISSUER`, `AUTH_CLIENT_ID`, `AUTH_CLIENT_SECRET`, … .
 //!
-//! URLs must be `https://`; plain `http://` is accepted only for loopback hosts (`localhost`,
-//! `127.0.0.1`, `[::1]`), i.e. local development. When the redirect URI is such a plain-HTTP URL, the
-//! cookies drop `Secure` and the `__Host-` prefix ([`BffConfig::secure_cookies`]) – the only relaxed
-//! setting, and only where the browser would otherwise refuse the cookie.
+//! URLs must be `https://`. Plain `http://` to a loopback host (`localhost`, `127.0.0.1`, `[::1]`) is
+//! for local development only and refused unless the app opts in with `allow_loopback_http`
+//! ([`Defaults::allow_loopback_http`], [`BffConfig::allow_loopback_http`]), e.g. only when its
+//! environment is `development`. When the redirect URI is such a plain-HTTP URL, the cookies drop
+//! `Secure` and the `__Host-` prefix ([`BffConfig::secure_cookies`]) – the only relaxed setting, and only
+//! where the browser would otherwise refuse the cookie.
 
 use super::cookies::SameSite;
 use super::timeouts::Timeouts;
-use url::{Host, Url};
+pub use super::urls::InvalidUrl;
+use super::urls::{check_url, url_kind};
+use url::Url;
 use z40_fundament::SecretString;
 use z40_fundament::config::{ConfigError, ConfigVar, Lookup};
 
@@ -38,6 +43,24 @@ pub struct BffConfig {
     pub login_rate_per_ip: u32,
     /// Login starts per minute, all clients together.
     pub login_rate_total: u32,
+    /// Whether plain-HTTP loopback URLs are accepted (local development only; default `false`). Set
+    /// with [`BffConfig::allow_loopback_http`] or [`Defaults::allow_loopback_http`].
+    pub allow_loopback_http: bool,
+}
+
+/// Defaults the app computes for [`BffConfig::from_lookup_with`] (e.g. the redirect URI from its public
+/// URL), used when the variable is unset or empty; and whether plain-HTTP loopback URLs are accepted.
+/// `Default`: no defaults, loopback HTTP refused (what [`BffConfig::from_lookup`] uses).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Defaults {
+    /// Default of `<PREFIX>_CLIENT_ID`.
+    pub client_id: Option<String>,
+    /// Default of `<PREFIX>_REDIRECT_URI` (checked like the variable).
+    pub redirect_uri: Option<String>,
+    /// Default of `<PREFIX>_POST_LOGOUT_REDIRECT_URI` (checked like the variable).
+    pub post_logout_redirect_uri: Option<String>,
+    /// Accept plain-HTTP loopback URLs; only for local development (e.g. `env == development`).
+    pub allow_loopback_http: bool,
 }
 
 /// Default idle timeout (2 hours).
@@ -55,13 +78,15 @@ impl BffConfig {
         ConfigVar {
             suffix: "ISSUER",
             default: None,
-            description: "Issuer of the login provider (`https://…`; `http://` only for loopback hosts), \
-                          exactly as in its discovery document. Required.",
+            description: "Issuer of the login provider (`https://…`; `http://` only for loopback hosts \
+                          when the app allows it in development), exactly as in its discovery document. \
+                          Required.",
         },
         ConfigVar {
             suffix: "CLIENT_ID",
             default: None,
-            description: "Client id of this app at the login provider. Required.",
+            description: "Client id of this app at the login provider. Required unless the app passes \
+                          a default (`from_lookup_with`).",
         },
         ConfigVar {
             suffix: "CLIENT_SECRET",
@@ -72,14 +97,16 @@ impl BffConfig {
             suffix: "REDIRECT_URI",
             default: None,
             description: "Callback URL of this app (`https://app.example.com/api/auth/callback`), exactly as \
-                          registered. Required. A plain-HTTP loopback URL (local development) turns off \
+                          registered. Required unless the app passes a default (`from_lookup_with`). A \
+                          plain-HTTP loopback URL (only when the app allows it in development) turns off \
                           `Secure` and the `__Host-` prefix of the cookies.",
         },
         ConfigVar {
             suffix: "POST_LOGOUT_REDIRECT_URI",
             default: None,
             description: "Where the login provider sends the browser after the logout, exactly as \
-                          registered. Unset: the provider's own page.",
+                          registered. Unset: the app's default (`from_lookup_with`), else the provider's \
+                          own page.",
         },
         ConfigVar {
             suffix: "COOKIE_SAMESITE",
@@ -115,15 +142,17 @@ impl BffConfig {
     ];
 
     /// Settings with the defaults of [`BffConfig::VARIABLES`] for the remaining fields. The URLs follow
-    /// the rules of the module docs (a trailing `/` of the issuer is removed).
+    /// the rules of the module docs (a trailing `/` of the issuer is removed); a plain-HTTP loopback URL
+    /// is accepted here, but [`super::BffBuilder::build`] refuses it unless
+    /// [`BffConfig::allow_loopback_http`] is set.
     pub fn new(
         issuer: &str,
         client_id: &str,
         client_secret: SecretString,
         redirect_uri: &str,
     ) -> Result<Self, InvalidUrl> {
-        check_url(issuer).map_err(|_| InvalidUrl("issuer"))?;
-        check_url(redirect_uri).map_err(|_| InvalidUrl("redirect_uri"))?;
+        check_url(issuer, true).map_err(|_| InvalidUrl("issuer"))?;
+        check_url(redirect_uri, true).map_err(|_| InvalidUrl("redirect_uri"))?;
         Ok(Self {
             issuer: issuer.strip_suffix('/').unwrap_or(issuer).to_owned(),
             client_id: client_id.to_owned(),
@@ -134,7 +163,15 @@ impl BffConfig {
             timeouts: Timeouts::from_secs(IDLE_DEFAULT as u32, ABSOLUTE_DEFAULT as u32),
             login_rate_per_ip: RATE_PER_IP_DEFAULT as u32,
             login_rate_total: RATE_TOTAL_DEFAULT as u32,
+            allow_loopback_http: false,
         })
+    }
+
+    /// Accepts (`true`) or refuses (`false`, the default) plain-HTTP loopback URLs. Only for local
+    /// development: pass e.g. `env == development`, never a constant `true`.
+    pub fn allow_loopback_http(mut self, allow: bool) -> Self {
+        self.allow_loopback_http = allow;
+        self
     }
 
     /// Checks the URLs (issuer, redirect URI, post-logout redirect URI) against the rules of the module
@@ -149,32 +186,72 @@ impl BffConfig {
             ),
         ];
         for (field, url) in urls {
-            if url.is_some_and(|u| check_url(u).is_err()) {
+            if url.is_some_and(|u| check_url(u, self.allow_loopback_http).is_err()) {
                 return Err(InvalidUrl(field));
             }
         }
         Ok(())
     }
 
-    /// Reads the variables of [`BffConfig::VARIABLES`] with `prefix`.
+    /// Reads the variables of [`BffConfig::VARIABLES`] with `prefix`; plain-HTTP loopback URLs are
+    /// refused (see [`BffConfig::from_lookup_with`]).
     pub fn from_lookup(
         prefix: &str,
         lookup: impl Fn(&str) -> Option<String>,
     ) -> Result<Self, ConfigError> {
+        Self::from_lookup_with(prefix, lookup, Defaults::default())
+    }
+
+    /// Like [`BffConfig::from_lookup`], with the app's `defaults` for unset variables and its choice
+    /// on plain-HTTP loopback URLs.
+    ///
+    /// ```
+    /// use z40_fundament_http::bff::{BffConfig, Defaults};
+    ///
+    /// # fn main() -> Result<(), z40_fundament::config::ConfigError> {
+    /// let public_url = "http://localhost:3000";
+    /// let development = true;
+    /// let env = |k: &str| match k {
+    ///     "AUTH_ISSUER" => Some("http://localhost:8400".to_owned()),
+    ///     "AUTH_CLIENT_SECRET" => Some("s3cr3t".to_owned()),
+    ///     _ => None,
+    /// };
+    /// let defaults = Defaults {
+    ///     client_id: Some("crm".into()),
+    ///     redirect_uri: Some(format!("{public_url}/api/auth/callback")),
+    ///     post_logout_redirect_uri: Some(format!("{public_url}/")),
+    ///     allow_loopback_http: development,
+    /// };
+    /// let config = BffConfig::from_lookup_with("AUTH", env, defaults)?;
+    /// assert_eq!(config.client_id, "crm");
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn from_lookup_with(
+        prefix: &str,
+        lookup: impl Fn(&str) -> Option<String>,
+        defaults: Defaults,
+    ) -> Result<Self, ConfigError> {
         let l = Lookup::new(prefix, lookup);
-        let required = |suffix: &str| {
+        let loopback = defaults.allow_loopback_http;
+        let required = |suffix: &str, default: Option<String>| {
             l.get(suffix)
+                .or(default)
                 .ok_or_else(|| l.invalid(suffix, "must be set"))
         };
         let url = |suffix: &str, raw: String| {
-            check_url(&raw).map_err(|reason| l.error(suffix, url_kind(), reason))?;
+            check_url(&raw, loopback).map_err(|reason| l.error(suffix, url_kind(), reason))?;
             Ok::<_, ConfigError>(raw)
         };
-        let issuer = url("ISSUER", required("ISSUER")?)?;
+        let issuer = url("ISSUER", required("ISSUER", None)?)?;
         let issuer = issuer.strip_suffix('/').unwrap_or(&issuer).to_owned();
-        let redirect_uri = url("REDIRECT_URI", required("REDIRECT_URI")?)?;
+        let redirect_uri = url(
+            "REDIRECT_URI",
+            required("REDIRECT_URI", defaults.redirect_uri)?,
+        )?;
         let post_logout_redirect_uri = l
             .get("POST_LOGOUT_REDIRECT_URI")
+            .or(defaults.post_logout_redirect_uri)
             .map(|raw| url("POST_LOGOUT_REDIRECT_URI", raw))
             .transpose()?;
         let same_site = match l.get("COOKIE_SAMESITE").as_deref() {
@@ -188,8 +265,8 @@ impl BffConfig {
         let total = l.number("LOGIN_RATE_TOTAL", RATE_TOTAL_DEFAULT, 1..=1_000_000)?;
         Ok(Self {
             issuer,
-            client_id: required("CLIENT_ID")?,
-            client_secret: SecretString::new(required("CLIENT_SECRET")?),
+            client_id: required("CLIENT_ID", defaults.client_id)?,
+            client_secret: SecretString::new(required("CLIENT_SECRET", None)?),
             redirect_uri,
             post_logout_redirect_uri,
             same_site,
@@ -197,42 +274,14 @@ impl BffConfig {
             timeouts: Timeouts::from_secs(idle as u32, absolute as u32),
             login_rate_per_ip: per_ip as u32,
             login_rate_total: total as u32,
+            allow_loopback_http: loopback,
         })
     }
 
     /// Whether cookies get `Secure` and the `__Host-` prefix: always, unless the redirect URI is plain
-    /// HTTP (which [`BffConfig::from_lookup`] only accepts for loopback hosts).
+    /// HTTP (only accepted for loopback hosts with `allow_loopback_http`).
     pub fn secure_cookies(&self) -> bool {
         Url::parse(&self.redirect_uri).map_or(true, |u| u.scheme() != "http")
-    }
-}
-
-/// A URL of the configuration breaks the rules of the module docs; names the field, never the value.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
-#[error("invalid URL in {0} (https://, http:// only for loopback hosts, no user info or fragment)")]
-pub struct InvalidUrl(pub &'static str);
-
-/// The error kind of a bad URL.
-fn url_kind() -> z40_fundament::config::ConfigErrorKind {
-    z40_fundament::config::ConfigErrorKind::InvalidUrl
-}
-
-/// `https://` URL, or `http://` to a loopback host; no user info, no fragment.
-pub(crate) fn check_url(raw: &str) -> Result<(), &'static str> {
-    let url = Url::parse(raw).map_err(|_| "not a URL")?;
-    if !url.username().is_empty() || url.password().is_some() || url.fragment().is_some() {
-        return Err("no user info or fragment allowed");
-    }
-    let loopback = match url.host() {
-        Some(Host::Domain(d)) => d == "localhost",
-        Some(Host::Ipv4(ip)) => ip.is_loopback(),
-        Some(Host::Ipv6(ip)) => ip.is_loopback(),
-        None => false,
-    };
-    match url.scheme() {
-        "https" if url.host().is_some() => Ok(()),
-        "http" if loopback => Ok(()),
-        _ => Err("expected https:// (http:// only for loopback hosts)"),
     }
 }
 

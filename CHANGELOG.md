@@ -8,6 +8,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ### Changed (breaking)
 
+- `z40-fundament-http`, feature `bff`: plain-HTTP loopback URLs (`http://localhost…`, `http://127.0.0.1…`,
+  `http://[::1]…`) are refused unless the app allows them for development. `BffConfig::from_lookup` refuses
+  them (error on the variable); `BffConfig::new` still accepts them, but `BffBuilder::build` refuses them
+  unless `BffConfig::allow_loopback_http` is `true` (default `false`). Migration: in development read the
+  configuration with `BffConfig::from_lookup_with(prefix, lookup, Defaults { allow_loopback_http: env ==
+  development, ..Defaults::default() })`, or call `.allow_loopback_http(env == development)` on a config
+  from `BffConfig::new`. `InvalidUrl`'s message names the new rule.
 - `z40-fundament-http`: the layers (`Csrf`, `NoStore`, `SecurityHeaders`, `RequestIdLayer`) now require the
   inner service to be `Clone`. Migration: none for axum apps (`Router::layer` already requires it); a
   hand-built tower stack wraps a non-`Clone` service in `tower::buffer::Buffer` first.
@@ -23,6 +30,10 @@ All notable changes to this project are documented in this file. The format is b
 - `z40-fundament-http`, feature `telemetry`: `TelemetryConfig::from_lookup_with(prefix, lookup, Defaults {
   filter, format })` – the app's default filter (after `<PREFIX>_LOG` and `RUST_LOG`) and format (after
   `<PREFIX>_LOG_FORMAT`); an invalid default filter is an error on `<PREFIX>_LOG`.
+- `z40-fundament-http`, feature `bff`: `BffConfig::from_lookup_with(prefix, lookup, Defaults { client_id,
+  redirect_uri, post_logout_redirect_uri, allow_loopback_http })` for defaults the app computes (used when
+  the variable is unset or empty, URLs checked like the variables); the field and builder-style setter
+  `BffConfig::allow_loopback_http`.
 
 ### Fixed
 
