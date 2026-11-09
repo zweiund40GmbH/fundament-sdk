@@ -1,19 +1,15 @@
 //! Writing an event into the outbox, inside the app's transaction (the outbox pattern): the change and
 //! its event commit or roll back together – no event without a change, no change without an event.
 
-use super::MySqlSource;
 use crate::StoreError;
-use crate::protocol::feed::is_uuid;
-use crate::sql::db;
 use chrono::{DateTime, Utc};
 use serde_json::Value;
-use sqlx::{MySql, Transaction};
 
 /// One change for the outbox: the complete current state of a record (only the fields consumers may
 /// see) or a tombstone.
 #[derive(Debug, Clone, PartialEq)]
 pub struct OutboxEvent {
-    /// Record type URN; one of the types of the [`MySqlSource`].
+    /// Record type URN; one of the types of the [`super::OutboxWriter`].
     pub record_type: String,
     /// Stable id of the record, a UUID (stored in lower case).
     pub key: String,
@@ -21,14 +17,16 @@ pub struct OutboxEvent {
     pub version: u64,
     /// Tombstone: the record was deleted.
     pub deleted: bool,
-    /// Time of the change.
-    pub occurred_at: DateTime<Utc>,
+    /// Time of the change; `None` (the default of [`OutboxEvent::state`] and
+    /// [`OutboxEvent::tombstone`]) takes the database clock when the event is written
+    /// (`UTC_TIMESTAMP(3)`), so all events of a source share one clock. Set it with [`OutboxEvent::at`].
+    pub occurred_at: Option<DateTime<Utc>>,
     /// The state as a JSON object; `None` for tombstones.
     pub data: Option<Value>,
 }
 
 impl OutboxEvent {
-    /// The state `data` of record `key` in `version`, now.
+    /// The state `data` of record `key` in `version`, at the time of writing (database clock).
     pub fn state(
         record_type: impl Into<String>,
         key: impl Into<String>,
@@ -40,26 +38,26 @@ impl OutboxEvent {
             key: key.into(),
             version,
             deleted: false,
-            occurred_at: Utc::now(),
+            occurred_at: None,
             data: Some(data),
         }
     }
 
-    /// A tombstone of record `key` in `version`, now.
+    /// A tombstone of record `key` in `version`, at the time of writing (database clock).
     pub fn tombstone(record_type: impl Into<String>, key: impl Into<String>, version: u64) -> Self {
         Self {
             record_type: record_type.into(),
             key: key.into(),
             version,
             deleted: true,
-            occurred_at: Utc::now(),
+            occurred_at: None,
             data: None,
         }
     }
 
-    /// The same event at `occurred_at`.
+    /// The same event at `occurred_at` (app clock) instead of the database clock.
     pub fn at(mut self, occurred_at: DateTime<Utc>) -> Self {
-        self.occurred_at = occurred_at;
+        self.occurred_at = Some(occurred_at);
         self
     }
 }
@@ -81,7 +79,7 @@ pub enum InvalidEvent {
     MissingData,
 }
 
-/// Failure of [`MySqlSource::write_event`].
+/// Failure of [`super::OutboxWriter::write`] and [`super::MySqlSource::write_event`].
 #[derive(Debug, thiserror::Error)]
 pub enum WriteEventError {
     /// The event breaks a rule; nothing was written.
@@ -96,69 +94,10 @@ pub enum WriteEventError {
     Store(#[from] StoreError),
 }
 
-/// MariaDB/MySQL error number of a duplicate key.
-const ER_DUP_ENTRY: u16 = 1062;
-
-/// Whether `e` is a duplicate key; the only unique key an insert can hit is the version key (`id` is
-/// generated, `cursor` is `NULL`).
-fn is_duplicate(e: &sqlx::Error) -> bool {
-    e.as_database_error()
-        .and_then(|d| d.try_downcast_ref::<sqlx::mysql::MySqlDatabaseError>())
-        .is_some_and(|m| m.number() == ER_DUP_ENTRY)
-}
-
-impl MySqlSource {
-    /// Checks `e` against the rules of the protocol and the types of this store.
-    pub(super) fn check(&self, e: &OutboxEvent) -> Result<(), InvalidEvent> {
-        if !self.types.contains(&e.record_type) {
-            return Err(InvalidEvent::UnknownType);
-        }
-        if !is_uuid(&e.key) {
-            return Err(InvalidEvent::InvalidKey);
-        }
-        if e.version == 0 {
-            return Err(InvalidEvent::InvalidVersion);
-        }
-        if !e.deleted && !e.data.as_ref().is_some_and(Value::is_object) {
-            return Err(InvalidEvent::MissingData);
-        }
-        Ok(())
-    }
-
-    /// Writes `event` into the outbox **in the app's transaction `tx`**, together with the change it
-    /// describes; the app commits or rolls back. The event gets its cursor after the commit (cursor
-    /// assigner). A tombstone's data is never stored. Writing the same version of a record twice is
-    /// [`WriteEventError::VersionExists`], so a lost update shows instead of two states with one version.
-    pub async fn write_event(
-        &self,
-        tx: &mut Transaction<'_, MySql>,
-        event: &OutboxEvent,
-    ) -> Result<(), WriteEventError> {
-        self.check(event)?;
-        let data = if event.deleted {
-            None
-        } else {
-            event.data.as_ref().map(Value::to_string)
-        };
-        sqlx::query(self.tables.sql(
-            "INSERT INTO {outbox} (`type`, `record_key`, `version`, `deleted`, `occurred_at`, `data`) \
-             VALUES (?, ?, ?, ?, ?, ?)",
-        ))
-        .bind(&event.record_type)
-        .bind(event.key.to_ascii_lowercase())
-        .bind(event.version)
-        .bind(event.deleted)
-        .bind(event.occurred_at.naive_utc())
-        .bind(data)
-        .execute(&mut **tx)
-        .await
-        .map_err(|e| {
-            if is_duplicate(&e) {
-                WriteEventError::VersionExists
-            } else {
-                WriteEventError::Store(db(e))
-            }
-        })?;
-        Ok(())
+impl WriteEventError {
+    /// Whether the app may run its whole transaction again: the database failed transiently
+    /// ([`StoreError::is_retryable`], e.g. a deadlock). A rule violation or an existing version is not.
+    pub fn is_retryable(&self) -> bool {
+        matches!(self, WriteEventError::Store(e) if e.is_retryable())
     }
 }

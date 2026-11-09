@@ -25,8 +25,8 @@
 //!   other apps, with per-app keys ([`status::StatusKeys`]) and [`status::poll_all`]
 //! * `feed-source` → [`feed_source`] – serving a feed: query rules, page building, axum endpoint and the
 //!   [`feed_source::FeedSourceStore`] trait
-//! * `feed-source-mysql` → [`feed_source_mysql`] – sqlx/MariaDB outbox, cursor assigner, retention and
-//!   poll log
+//! * `feed-source-mysql` → [`feed_source_mysql`] – sqlx/MariaDB outbox (also without a pool:
+//!   [`feed_source_mysql::OutboxWriter`]), cursor assigner, retention and poll log
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
 pub mod config;

@@ -51,7 +51,7 @@ fn event(
 
 impl FeedSourceStore for MySqlSource {
     fn known_types(&self) -> &[String] {
-        &self.types
+        &self.writer.types
     }
 
     async fn assign_cursors(&self, max_wait: Duration) -> Result<AssignOutcome, StoreError> {
@@ -60,7 +60,8 @@ impl FeedSourceStore for MySqlSource {
 
     async fn last_cursor(&self) -> Result<Option<u64>, StoreError> {
         let last: Option<u64> = sqlx::query_scalar(
-            self.tables
+            self.writer
+                .tables
                 .sql("SELECT `last` FROM {counter} WHERE `id` = 1"),
         )
         .fetch_optional(&self.pool)
@@ -79,7 +80,7 @@ impl FeedSourceStore for MySqlSource {
             return Ok(Vec::new());
         }
         let mut q = sqlx::QueryBuilder::<sqlx::MySql>::new(
-            self.tables
+            self.writer.tables
                 .sql(
                     "SELECT `id`, `cursor`, `type`, `record_key`, `version`, `deleted`, `occurred_at`, \
                      `data` FROM {outbox} WHERE `cursor` > ",

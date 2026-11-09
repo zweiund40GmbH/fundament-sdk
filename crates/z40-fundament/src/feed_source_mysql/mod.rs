@@ -3,8 +3,9 @@
 //! `schema/mysql-source.sql`, with names chosen by the app ([`SourceTables`]). The library does not
 //! create the tables; copy the schema into your migrations.
 //!
-//! * the **outbox**: [`MySqlSource::write_event`] writes an event in the app's own transaction, together
-//!   with the change (the library never opens or commits that transaction)
+//! * the **outbox**: [`MySqlSource::write_event`] (or [`OutboxWriter::write`], which needs no pool)
+//!   writes an event in the app's own transaction, together with the change (the library never opens
+//!   or commits that transaction); without an explicit time `occurred_at` is the database clock
 //! * the **cursor assigner**: under `GET_LOCK` on a held connection, committed events get ascending
 //!   cursors in the order of origin; it waits a bounded time for events of a still open transaction and
 //!   never skips one (they get a higher cursor in a later round). Each round uses a new connection.
@@ -23,15 +24,16 @@ mod outbox;
 mod polls;
 mod read;
 mod retention;
+mod writer;
 
 pub use outbox::{InvalidEvent, OutboxEvent, WriteEventError};
 pub use retention::FAILURE_RETENTION_HOURS;
+pub use writer::OutboxWriter;
 
 pub use crate::sql::InvalidTableName;
 
-use crate::feed_source::is_valid_type;
 use crate::sql::{check_names, check_prefix};
-use sqlx::{AssertSqlSafe, MySqlPool};
+use sqlx::{AssertSqlSafe, MySql, MySqlPool, Transaction};
 
 /// The schema with the default table names (`fundament_outbox`, `fundament_outbox_counter`,
 /// `fundament_poll`, `fundament_poll_failure`).
@@ -127,8 +129,7 @@ impl SourceTables {
 #[derive(Debug, Clone)]
 pub struct MySqlSource {
     pool: MySqlPool,
-    tables: SourceTables,
-    types: Vec<String>,
+    writer: OutboxWriter,
 }
 
 impl MySqlSource {
@@ -139,17 +140,9 @@ impl MySqlSource {
         tables: SourceTables,
         types: impl IntoIterator<Item = impl Into<String>>,
     ) -> Result<Self, InvalidType> {
-        let mut checked: Vec<String> = Vec::new();
-        for t in types.into_iter().map(Into::into) {
-            if !is_valid_type(&t) || checked.contains(&t) {
-                return Err(InvalidType);
-            }
-            checked.push(t);
-        }
         Ok(Self {
             pool,
-            tables,
-            types: checked,
+            writer: OutboxWriter::new(tables, types)?,
         })
     }
 
@@ -160,7 +153,21 @@ impl MySqlSource {
 
     /// The table names.
     pub fn tables(&self) -> &SourceTables {
-        &self.tables
+        &self.writer.tables
+    }
+
+    /// The outbox writer of this source (same tables and types), e.g. for code that has no pool.
+    pub fn writer(&self) -> &OutboxWriter {
+        &self.writer
+    }
+
+    /// Writes `event` in the app's transaction `tx`: [`OutboxWriter::write`].
+    pub async fn write_event(
+        &self,
+        tx: &mut Transaction<'_, MySql>,
+        event: &OutboxEvent,
+    ) -> Result<(), WriteEventError> {
+        self.writer.write(tx, event).await
     }
 }
 

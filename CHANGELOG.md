@@ -12,12 +12,27 @@ All notable changes to this project are documented in this file. The format is b
   `StoreError::is_retryable()` and `StoreError::with_kind(kind, error)`. The MariaDB/MySQL implementations
   classify their errors: deadlock (1213), lock wait timeout (1205), I/O errors, pool timeout and a crashed
   connection worker are retryable, a duplicate key (1062) is a conflict. No sqlx type in the public API.
+- `z40-fundament`, feature `feed-source-mysql`: `OutboxWriter::new(tables, types)` with
+  `write(&mut tx, &event)` writes outbox events without a pool (same checks and `VersionExists` as before);
+  `MySqlSource::write_event` delegates to it, `MySqlSource::writer()` returns it.
+  `WriteEventError::is_retryable()`.
 
 ### Changed
 
 - `z40-fundament`, features `feed-consumer` and `status-client`: reqwest 0.13 (rustls with the aws-lc-rs
   provider and the platform verifier, plus the built-in Mozilla roots from `webpki-root-certs`; no OpenSSL).
   Timeouts, body limits and the redirect policy are unchanged.
+- `z40-fundament`, feature `feed-source-mysql`: `MySqlSource::purge` measures the age of events against the
+  database clock, and `offer_figures` counts the last 5 minutes and 24 hours up to the database clock (the
+  `now` argument is not used), consistent with `occurred_at` stamped by the database.
+
+### Changed (breaking)
+
+- `z40-fundament`, feature `feed-source-mysql`: `OutboxEvent::occurred_at` is `Option<DateTime<Utc>>`.
+  `OutboxEvent::state` and `OutboxEvent::tombstone` leave it `None`, and the database fills it with
+  `UTC_TIMESTAMP(3)` when the event is written; `.at(t)` still sets an explicit time. Migration: code that
+  builds `OutboxEvent` with a struct literal wraps the time in `Some(…)`; code that reads the field handles
+  `None`; code that relied on the app clock calls `.at(Utc::now())`.
 
 ## [0.5.0] - 2026-11-08
 ### Added

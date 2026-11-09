@@ -11,7 +11,9 @@ use common::source::{T, assign, commit, commit_all, feed, key, source, state};
 use common::with_schema;
 use serde_json::json;
 use z40_fundament::feed_source::{AssignOutcome, FeedSourceStore, SourceStatusStore};
-use z40_fundament::feed_source_mysql::{OutboxEvent, SourceTables, WriteEventError};
+use z40_fundament::feed_source_mysql::{
+    InvalidEvent, OutboxEvent, OutboxWriter, SourceTables, WriteEventError,
+};
 
 #[tokio::test]
 async fn outbox_lives_in_the_app_transaction() {
@@ -175,6 +177,71 @@ async fn retention_walks_all_windows() {
         let rest = feed(&s).await;
         assert_eq!(rest.len(), 1501);
         assert_eq!(rest.last().map(|(k, _)| k.clone()), Some(key(2)));
+    })
+    .await;
+}
+
+/// The writer needs no pool; without an explicit time the database clock stamps the event, `.at` wins.
+#[tokio::test]
+async fn writer_without_pool_and_database_clock() {
+    let tables = SourceTables::with_prefix("c_").unwrap();
+    with_schema("src_writer", tables.schema(), |pool| async move {
+        let writer = OutboxWriter::new(tables.clone(), [T]).unwrap();
+        assert_eq!(source(pool.clone(), tables).writer(), &writer);
+        let fixed = chrono::DateTime::parse_from_rfc3339("2020-01-02T03:04:05Z")
+            .unwrap()
+            .to_utc();
+        let mut tx = pool.begin().await.unwrap();
+        writer.write(&mut tx, &state(1, 1)).await.unwrap();
+        writer.write(&mut tx, &state(2, 1).at(fixed)).await.unwrap();
+        let unknown = OutboxEvent::state("urn:example:crm:site", key(3), 1, json!({}));
+        assert!(matches!(
+            writer.write(&mut tx, &unknown).await,
+            Err(WriteEventError::Invalid(InvalidEvent::UnknownType))
+        ));
+        tx.commit().await.unwrap();
+        let (skew, at): (i64, chrono::NaiveDateTime) = sqlx::query_as(
+            "SELECT ABS(TIMESTAMPDIFF(SECOND, \
+               (SELECT occurred_at FROM c_fundament_outbox WHERE version = 1 AND record_key = ?), \
+               UTC_TIMESTAMP(3))), \
+             (SELECT occurred_at FROM c_fundament_outbox WHERE record_key = ?)",
+        )
+        .bind(key(1))
+        .bind(key(2))
+        .fetch_one(&pool)
+        .await
+        .unwrap();
+        assert!(skew <= 5, "database clock, {skew} s off");
+        assert_eq!(at.and_utc(), fixed, "an explicit time wins");
+    })
+    .await;
+}
+
+/// Two transactions writing the same version: while the first is open, the second waits and gets a
+/// retryable lock wait timeout; after the first committed, the version exists.
+#[tokio::test]
+async fn lock_wait_is_retryable_and_duplicate_version_is_not() {
+    let tables = SourceTables::with_prefix("l_").unwrap();
+    with_schema("src_lock_wait", tables.schema(), |pool| async move {
+        let writer = OutboxWriter::new(tables, [T]).unwrap();
+        let mut a = pool.begin().await.unwrap();
+        writer.write(&mut a, &state(1, 1)).await.unwrap();
+        let mut conn = pool.acquire().await.unwrap();
+        sqlx::query("SET SESSION innodb_lock_wait_timeout = 1")
+            .execute(&mut *conn)
+            .await
+            .unwrap();
+        let mut b = sqlx::Connection::begin(&mut *conn).await.unwrap();
+        let Err(WriteEventError::Store(e)) = writer.write(&mut b, &state(1, 1)).await else {
+            panic!("expected a lock wait timeout");
+        };
+        assert!(e.is_retryable(), "{e}");
+        b.rollback().await.unwrap();
+        a.commit().await.unwrap();
+        let mut c = sqlx::Connection::begin(&mut *conn).await.unwrap();
+        let again = writer.write(&mut c, &state(1, 1)).await.unwrap_err();
+        assert!(matches!(again, WriteEventError::VersionExists));
+        assert!(!again.is_retryable());
     })
     .await;
 }

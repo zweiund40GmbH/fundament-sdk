@@ -32,15 +32,23 @@ impl MySqlSource {
     /// worker. It walks the outbox once in windows of consecutive ids (keyset: each batch continues after
     /// the last id of the previous one, so no batch scans the table again); each window is its own
     /// `READ COMMITTED` transaction, so writers of the outbox are not blocked.
+    ///
+    /// The age is measured against the database clock (`UTC_TIMESTAMP`), the clock of events written
+    /// without an explicit time; the failed-attempt counters, written with the app's time, against the
+    /// app clock.
     pub async fn purge(&self, older_than: Duration) -> Result<u64, StoreError> {
         let now = Utc::now();
+        let db_now: chrono::NaiveDateTime = sqlx::query_scalar("SELECT UTC_TIMESTAMP(3)")
+            .fetch_one(&self.pool)
+            .await
+            .map_err(db)?;
         let cutoff = chrono::Duration::from_std(older_than)
             .ok()
-            .and_then(|d| now.checked_sub_signed(d));
+            .and_then(|d| db_now.checked_sub_signed(d));
         let mut total = 0u64;
         if let Some(cutoff) = cutoff {
             let mut after = 0u64;
-            while let Some((upper, n)) = self.purge_window(after, cutoff.naive_utc()).await? {
+            while let Some((upper, n)) = self.purge_window(after, cutoff).await? {
                 total += n;
                 after = upper;
             }
@@ -49,17 +57,21 @@ impl MySqlSource {
             .duration_trunc(chrono::Duration::hours(1))
             .unwrap_or(now)
             - chrono::Duration::hours(FAILURE_RETENTION_HOURS);
-        sqlx::query(self.tables.sql("DELETE FROM {failure} WHERE `hour` < ?"))
-            .bind(hour.naive_utc())
-            .execute(&self.pool)
-            .await
-            .map_err(db)?;
+        sqlx::query(
+            self.writer
+                .tables
+                .sql("DELETE FROM {failure} WHERE `hour` < ?"),
+        )
+        .bind(hour.naive_utc())
+        .execute(&self.pool)
+        .await
+        .map_err(db)?;
         Ok(total)
     }
 
     /// The last id of the window of up to [`WINDOW`] ids after `after`, or `None` at the end.
     async fn window_end(&self, after: u64) -> Result<Option<u64>, StoreError> {
-        sqlx::query_scalar(self.tables.sql(
+        sqlx::query_scalar(self.writer.tables.sql(
             "SELECT MAX(`id`) FROM (SELECT `id` FROM {outbox} WHERE `id` > ? ORDER BY `id` LIMIT ?) AS w",
         ))
         .bind(after)
@@ -86,7 +98,7 @@ impl MySqlSource {
             .await
             .map_err(db)?;
         let mut tx = sqlx::Connection::begin(&mut *conn).await.map_err(db)?;
-        let r = sqlx::query(self.tables.sql(PURGE_WINDOW))
+        let r = sqlx::query(self.writer.tables.sql(PURGE_WINDOW))
             .bind(after)
             .bind(end)
             .bind(after)

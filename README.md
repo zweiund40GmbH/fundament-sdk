@@ -29,7 +29,7 @@ Ready-made MariaDB/MySQL implementations live behind their own feature. The seco
 | `status` | Status document types and builder, and an axum router for `GET /fundament/v1/status` with key check and failure brake |
 | `status-client` | Reading the status of other apps: `StatusClient` (`GET /fundament/v1/status`, 2 s deadline, no redirects, 256 KiB limit, lenient parsing, fixed error texts), `StatusKeys` (one status key per target app) and `poll_all` (bounded parallel polling) |
 | `feed-source` | Serving a feed: `FeedEndpoint` (axum router for `GET /fundament/v1/events`: key check, failure brake, query rules, `hasMore`), the `FeedSourceStore` and `SourceStatusStore` traits, `assign_cursors_once` for the worker; with `status` also `source_status` (`angebote`, `abrufer`, failed attempts) |
-| `feed-source-mysql` | `MySqlSource`: sqlx/MariaDB outbox written in the app's transaction, cursor assigner after commit (`GET_LOCK`), retention that keeps the newest state per record, poll log; schema in [`schema/mysql-source.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql-source.sql) |
+| `feed-source-mysql` | `MySqlSource`: sqlx/MariaDB outbox written in the app's transaction (also without a pool: `OutboxWriter`; `occurred_at` from the database clock unless set), database errors classified (deadlock and lock wait retryable), cursor assigner after commit (`GET_LOCK`), retention that keeps the newest state per record, poll log; schema in [`schema/mysql-source.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql-source.sql) |
 
 Planned: caching, GraphQL helpers and token credentials.
 
@@ -113,6 +113,12 @@ let state = serde_json::json!({ "name": "Example Ltd", "address": { "city": "Spr
 source.write_event(&mut tx, &OutboxEvent::state(CUSTOMER, customer_id, version, state)).await?;
 tx.commit().await?;
 ```
+
+Without `.at(time)` the database clock stamps `occurred_at`, the clock the retention and the status figures
+measure against. Code that has no `MySqlSource` (and no pool) writes with
+`OutboxWriter::new(SourceTables::with_prefix("app_")?, [CUSTOMER])?.write(&mut tx, &event)`. When
+`WriteEventError::is_retryable()` (deadlock, lock wait timeout, lost connection), run the whole transaction
+again; `VersionExists` is a lost update and is not retryable.
 
 3. Serve the feed and run the cursor assigner and the retention in your worker:
 
