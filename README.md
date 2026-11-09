@@ -46,7 +46,10 @@ z40-fundament-http = { version = "0.5", features = ["request-id", "trace", "tele
 | *(none)* | `SecurityHeaders` (CSP checked: no unsafe script sources (`'unsafe-inline'`, `'unsafe-eval'`, `'unsafe-hashes'`, `*`, bare schemes), `frame-ancestors` required and not open; `X-Frame-Options`, `nosniff`, `Referrer-Policy`, `Permissions-Policy`, `Cross-Origin-*`; no HSTS), `NoStore`, `TrustedProxies` / `ClientIp` (`X-Forwarded-For` only from trusted proxies, also as `client_ip` function of the endpoints above), `Csrf` (custom header on state-changing requests, exempt paths, `403 {"code":"CSRF",…}` or the app's own answer) |
 | `request-id` | `RequestIdLayer`: keeps a safe incoming `X-Request-Id` or creates a UUID v7, echoes it |
 | `trace` | `trace::layer()`: method, route template (`<unmatched>` for unknown routes), request id, status, latency – never query strings, headers or bodies |
-| `telemetry` | `TelemetryConfig`: JSON or one-line text logs from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info`) / `<PREFIX>_LOG_FORMAT` (`json` \| `text`), `init` that reports what it did |
+| `telemetry` | `TelemetryConfig`: JSON or one-line text logs from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info` or the app's default via `from_lookup_with`) / `<PREFIX>_LOG_FORMAT` (`json` \| `text`), `init` that reports what it did |
+| `bff` | Server-side OIDC login and sessions for backend-for-frontend apps (`Bff`, `Session<T>`, `SessionStore`, login limit per process or shared via `LoginLimitStore`) |
+| `bff-mysql` | `MySqlSessionStore` and `MySqlLoginLimitStore` (MariaDB/MySQL) |
+| `test-util` | **Test-only:** `test_util::FakeProvider`, a login provider on loopback for the tests of `bff` apps |
 
 Usage and layer order: [crate README](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament-http/README.md).
 

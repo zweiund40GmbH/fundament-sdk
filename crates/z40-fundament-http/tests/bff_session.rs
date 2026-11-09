@@ -1,6 +1,6 @@
 //! Session lookup against the fake provider: idle and absolute timeout, recording of the last use, the
 //! optional extractor.
-#![cfg(feature = "bff")]
+#![cfg(feature = "test-util")]
 #![allow(clippy::unwrap_used)]
 
 mod common;

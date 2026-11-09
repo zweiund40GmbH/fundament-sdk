@@ -5,6 +5,7 @@ mod common;
 
 use axum::Router;
 use axum::body::Body;
+use axum::extract::connect_info::MockConnectInfo;
 use axum::extract::{ConnectInfo, FromRef};
 use axum::http::Request;
 use axum::http::request::Parts;
@@ -142,5 +143,62 @@ async fn without_connect_info() {
         resolve(&parts),
         None::<IpAddr>,
         "the endpoints of z40-fundament then warn"
+    );
+}
+
+/// The extractor and the resolver of a router with axum's `MockConnectInfo` layer, as in app tests.
+async fn seen_mocked(peer: &str, xff: Option<&str>, real: Option<&str>) -> (String, String) {
+    let proxies = TrustedProxies::parse(PROXIES).unwrap();
+    let resolve = std::sync::Arc::new(proxies.resolver());
+    let peer = SocketAddr::new(peer.parse().unwrap(), 40000);
+    let app = Router::new()
+        .route(
+            "/",
+            get(
+                move |ClientIp(ip): ClientIp, req: Request<Body>| async move {
+                    let resolved = resolve(&req.into_parts().0).map(|ip| ip.to_string());
+                    format!("{ip} {}", resolved.unwrap_or_default())
+                },
+            ),
+        )
+        .with_state(State { proxies })
+        .layer(MockConnectInfo(peer));
+    let mut b = Request::builder().uri("/");
+    if let Some(xff) = xff {
+        b = b.header("x-forwarded-for", xff);
+    }
+    let mut req = b.body(Body::empty()).unwrap();
+    if let Some(real) = real {
+        let addr = SocketAddr::new(real.parse().unwrap(), 40000);
+        req.extensions_mut().insert(ConnectInfo(addr));
+    }
+    let res = app.oneshot(req).await.unwrap();
+    let bytes = axum::body::to_bytes(res.into_body(), 1024).await.unwrap();
+    let text = String::from_utf8(bytes.to_vec()).unwrap();
+    let (a, b) = text.split_once(' ').unwrap();
+    (a.to_owned(), b.to_owned())
+}
+
+#[tokio::test]
+async fn mock_connect_info_in_router_tests() {
+    let both = |s: &str| (s.to_owned(), s.to_owned());
+    assert_eq!(
+        seen_mocked("203.0.113.9", None, None).await,
+        both("203.0.113.9")
+    );
+    assert_eq!(
+        seen_mocked("203.0.113.9", Some("6.6.6.6"), None).await,
+        both("203.0.113.9"),
+        "untrusted mocked peer: header ignored"
+    );
+    assert_eq!(
+        seen_mocked("10.0.0.2", Some("198.51.100.7"), None).await,
+        both("198.51.100.7"),
+        "mocked proxy peer: header walked"
+    );
+    assert_eq!(
+        seen_mocked("10.0.0.2", Some("198.51.100.7"), Some("203.0.113.9")).await,
+        both("203.0.113.9"),
+        "a real ConnectInfo wins"
     );
 }

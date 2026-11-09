@@ -29,6 +29,10 @@
 //! # }
 //! ```
 
+mod header;
+
+pub use header::CsrfHeader;
+
 use crate::middleware::{Hook, Sealed, hook_layer};
 use crate::no_store::set_no_store;
 use crate::paths::Scope;
@@ -111,10 +115,31 @@ impl Csrf {
             .ok()
             .filter(|_| ok)
             .ok_or(CsrfConfigError::Value)?;
-        Ok(Self::check(move |h: &HeaderMap| {
+        Ok(Self::guard(name, value))
+    }
+
+    /// Requires the header of `header`, checked at compile time (see [`CsrfHeader`]): unlike
+    /// [`Csrf::header`] this cannot fail, so an app needs no fallback for a start-up error.
+    ///
+    /// ```
+    /// use z40_fundament_http::csrf::{Csrf, CsrfHeader};
+    ///
+    /// let layer = Csrf::header_static(const { CsrfHeader::new("x-requested-with", "crm") });
+    /// ```
+    pub fn header_static(header: CsrfHeader) -> Self {
+        // Cannot panic: `CsrfHeader::new` accepted only lowercase tokens and visible ASCII, a subset of
+        // what `from_static` takes (unit test in `header.rs`).
+        let name = HeaderName::from_static(header.name);
+        let value = HeaderValue::from_static(header.value);
+        Self::guard(name, value)
+    }
+
+    /// The check of a header `name` with exactly `value`.
+    fn guard(name: HeaderName, value: HeaderValue) -> Self {
+        Self::check(move |h: &HeaderMap| {
             h.get(&name)
                 .is_some_and(|v| v.as_bytes() == value.as_bytes())
-        }))
+        })
     }
 
     /// Lets a state-changing request pass when `check` returns `true` for its headers.
@@ -206,82 +231,4 @@ impl Hook for Csrf {
 hook_layer!(Csrf);
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn headers(pairs: &[(&'static str, &'static str)]) -> HeaderMap {
-        let mut h = HeaderMap::new();
-        for (k, v) in pairs {
-            h.insert(*k, HeaderValue::from_static(v));
-        }
-        h
-    }
-
-    #[test]
-    fn which_requests_are_checked() {
-        let c = Csrf::header("x-requested-with", "crm")
-            .unwrap()
-            .protect_prefix("/api/")
-            .protect_path("/auth/logout")
-            .exempt_path("/api/auth/backchannel-logout");
-        assert!(c.requires_check(&Method::POST, "/api/graphql"));
-        assert!(
-            c.requires_check(&Method::DELETE, "/api/x")
-                && c.requires_check(&Method::PATCH, "/api/x")
-        );
-        assert!(c.requires_check(&Method::POST, "/auth/logout"));
-        assert!(!c.requires_check(&Method::POST, "/api/auth/backchannel-logout"));
-        assert!(
-            !c.requires_check(&Method::GET, "/api/me")
-                && !c.requires_check(&Method::OPTIONS, "/api/x")
-        );
-        assert!(!c.requires_check(&Method::POST, "/healthz"));
-    }
-
-    #[test]
-    fn header_must_match_exactly() {
-        let c = Csrf::header("X-Requested-With", "crm").unwrap();
-        let post = Method::POST;
-        assert!(!c.allows(&post, "/x", &HeaderMap::new()));
-        assert!(!c.allows(
-            &post,
-            "/x",
-            &headers(&[("x-requested-with", "XMLHttpRequest")])
-        ));
-        assert!(!c.allows(&post, "/x", &headers(&[("x-requested-with", "CRM")])));
-        assert!(c.allows(&post, "/x", &headers(&[("x-requested-with", "crm")])));
-        assert!(c.allows(&Method::GET, "/x", &HeaderMap::new()));
-    }
-
-    #[test]
-    fn invalid_configuration() {
-        for safelisted in [
-            "Content-Type",
-            "accept",
-            "accept-language",
-            "content-language",
-            "range",
-        ] {
-            assert_eq!(
-                Csrf::header(safelisted, "crm").unwrap_err(),
-                CsrfConfigError::Name,
-                "{safelisted}"
-            );
-        }
-        let c = Csrf::header("x-csrf", "1").unwrap().protect_prefix("/auth");
-        assert!(c.requires_check(&Method::POST, "/auth/logout"));
-        assert!(!c.requires_check(&Method::POST, "/authority"));
-        assert_eq!(
-            Csrf::header("bad name", "x").unwrap_err(),
-            CsrfConfigError::Name
-        );
-        assert_eq!(
-            Csrf::header("x-csrf", "").unwrap_err(),
-            CsrfConfigError::Value
-        );
-        assert_eq!(
-            Csrf::header("x-csrf", "a b").unwrap_err(),
-            CsrfConfigError::Value
-        );
-    }
-}
+mod tests;

@@ -1,6 +1,6 @@
 //! `MySqlSessionStore` against MariaDB (`TEST_DATABASE_URL`): the store operations, that only hashes and
 //! sealed values reach the database, the cleanup, and a full login round trip over it.
-#![cfg(feature = "bff-mysql")]
+#![cfg(all(feature = "bff-mysql", feature = "test-util"))]
 #![allow(clippy::unwrap_used)]
 
 mod common;

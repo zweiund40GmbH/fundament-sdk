@@ -6,6 +6,24 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Changed (breaking)
+
+- `z40-fundament`, feature `feed-source-mysql`: `OutboxEvent::occurred_at` is `Option<DateTime<Utc>>`.
+  `OutboxEvent::state` and `OutboxEvent::tombstone` leave it `None`, and the database fills it with
+  `UTC_TIMESTAMP(3)` when the event is written; `.at(t)` still sets an explicit time. Migration: code that
+  builds `OutboxEvent` with a struct literal wraps the time in `Some(…)`; code that reads the field handles
+  `None`; code that relied on the app clock calls `.at(Utc::now())`.
+- `z40-fundament-http`, feature `bff`: plain-HTTP loopback URLs (`http://localhost…`, `http://127.0.0.1…`,
+  `http://[::1]…`) are refused unless the app allows them for development. `BffConfig::from_lookup` refuses
+  them (error on the variable); `BffConfig::new` still accepts them, but `BffBuilder::build` refuses them
+  unless `BffConfig::allow_loopback_http` is `true` (default `false`). Migration: in development read the
+  configuration with `BffConfig::from_lookup_with(prefix, lookup, Defaults { allow_loopback_http: env ==
+  development, ..Defaults::default() })`, or call `.allow_loopback_http(env == development)` on a config
+  from `BffConfig::new`. `InvalidUrl`'s message names the new rule.
+- `z40-fundament-http`: the layers (`Csrf`, `NoStore`, `SecurityHeaders`, `RequestIdLayer`) now require the
+  inner service to be `Clone`. Migration: none for axum apps (`Router::layer` already requires it); a
+  hand-built tower stack wraps a non-`Clone` service in `tower::buffer::Buffer` first.
+
 ### Added
 
 - `z40-fundament`, no feature: `StoreErrorKind` (`Retryable`, `Conflict`, `Other`) with `StoreError::kind()`,
@@ -29,6 +47,32 @@ All notable changes to this project are documented in this file. The format is b
   `StatusTarget::plain_http_for_tests(app, origin)` for loopback servers in tests.
 - `z40-fundament`, feature `test-util`: `test_util::key(n)`, `test_util::FeedPageBuilder` (consistent feed
   pages, also as JSON) and `test_util::status_document(app, level)`.
+- `z40-fundament-http`: `TrustedProxies::client_ip`, `resolver()`, the `ClientIp` extractor and the default
+  client address of the `bff` login limit also take the peer from axum's `MockConnectInfo<SocketAddr>` (router
+  tests without a server); a real `ConnectInfo` wins. The README shows the `FromRef` impl for `ClientIp`.
+- `z40-fundament-http`: `csrf::CsrfHeader::new(name, value)` (`const fn`) and the infallible
+  `Csrf::header_static(header)`. Built in a const context, a bad name (not a lowercase header token, or
+  CORS-safelisted) or value (empty, not visible ASCII) is a compile error.
+- `z40-fundament-http`, feature `telemetry`: `TelemetryConfig::from_lookup_with(prefix, lookup, Defaults {
+  filter, format })` – the app's default filter (after `<PREFIX>_LOG` and `RUST_LOG`) and format (after
+  `<PREFIX>_LOG_FORMAT`); an invalid default filter is an error on `<PREFIX>_LOG`.
+- `z40-fundament-http`, feature `bff`: `BffConfig::from_lookup_with(prefix, lookup, Defaults { client_id,
+  redirect_uri, post_logout_redirect_uri, allow_loopback_http })` for defaults the app computes (used when
+  the variable is unset or empty, URLs checked like the variables); the field and builder-style setter
+  `BffConfig::allow_loopback_http`.
+- `z40-fundament-http`, feature `test-util` (new, test-only): `test_util::FakeProvider` (`start(client_id)`,
+  `issuer`, `authorize`, `logout_token`, `sign`), the fake login provider of this crate's own tests, for the
+  tests of `bff` apps; `bff::token::generate` is public with this feature.
+- `z40-fundament-http`, feature `bff`: `LoginLimitStore` (atomic `increment(key, window_start, window_end)`)
+  and `BffBuilder::login_limit_store(store)`: the counters of the login limit shared by all instances, with
+  the same rules (per client address, IPv6 by /64, and in total; `429` with `Retry-After: 60`; a refused
+  start writes nothing) in full-minute windows (UTC). Keys are SHA-256 hashes, never addresses. A failing
+  store fails the start (`500` page). The default stays the in-process counters.
+- `z40-fundament-http`, feature `bff-mysql`: `MySqlLoginLimitStore` (`new(pool, tables)`,
+  `MySqlSessionStore::login_limit_store()`, `delete_expired(now)`) over the new table `bff_login_limit` in
+  `schema/mysql-session.sql` and `SessionTables::schema()` (`CREATE TABLE IF NOT EXISTS`; only needed with
+  the shared limit); `SessionTables::login_limit_table(name)`. `MySqlSessionStore::delete_expired` is
+  unchanged and does not touch the new table.
 
 ### Changed
 
@@ -39,13 +83,12 @@ All notable changes to this project are documented in this file. The format is b
   database clock, and `offer_figures` counts the last 5 minutes and 24 hours up to the database clock (the
   `now` argument is not used), consistent with `occurred_at` stamped by the database.
 
-### Changed (breaking)
+### Fixed
 
-- `z40-fundament`, feature `feed-source-mysql`: `OutboxEvent::occurred_at` is `Option<DateTime<Utc>>`.
-  `OutboxEvent::state` and `OutboxEvent::tombstone` leave it `None`, and the database fills it with
-  `UTC_TIMESTAMP(3)` when the event is written; `.at(t)` still sets an explicit time. Migration: code that
-  builds `OutboxEvent` with a struct literal wraps the time in `Some(…)`; code that reads the field handles
-  `None`; code that relied on the app clock calls `.at(Utc::now())`.
+- `z40-fundament-http`: a request a layer answers itself (e.g. refused by `Csrf`) no longer keeps the
+  readiness reservation of the inner service (e.g. a permit of a `ConcurrencyLimit`): `call` takes the
+  ready inner service out, leaves a clone behind and drops the ready one on rejection.
+
 
 ## [0.5.0] - 2026-11-08
 ### Added

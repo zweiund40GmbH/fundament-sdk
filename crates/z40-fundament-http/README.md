@@ -21,8 +21,9 @@ helpers of [`z40-fundament`](https://crates.io/crates/z40-fundament).
 | `request-id` | `RequestIdLayer`: keeps a safe incoming `X-Request-Id` (≤ 64 of `[A-Za-z0-9._:-]`) or creates a UUID v7, echoes it, `RequestId` extension |
 | `trace` | `trace::layer()`: span with method, route template (`<unmatched>` for unknown routes, raw path only on opt-in) and request id; status and latency at the end; never query strings, headers or bodies |
 | `bff` | Login and sessions for backend-for-frontend apps with [`z40-auth`](https://crates.io/crates/z40-auth): `Bff::router()` (`GET <base>/login?returnTo=`, `GET <base>/callback`, `POST <base>/logout`, `POST <base>/backchannel-logout`), `Session<T>` extractor, `SessionStore` trait, `BffConfig` (`<PREFIX>_ISSUER`, `<PREFIX>_CLIENT_ID`, …) |
-| `bff-mysql` | `MySqlSessionStore` (MariaDB/MySQL, sqlx) with table prefix, `schema/mysql-session.sql` and `delete_expired` for the worker |
-| `telemetry` | `TelemetryConfig`: JSON lines or one-line text, `EnvFilter`, from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info`) and `<PREFIX>_LOG_FORMAT` (`json` \| `text`); `init` reports what it did (installed, installed without `log` bridge, already installed) |
+| `bff-mysql` | `MySqlSessionStore` (MariaDB/MySQL, sqlx) with table prefix, `schema/mysql-session.sql` and `delete_expired` for the worker; `MySqlLoginLimitStore` for a login limit shared by all instances |
+| `test-util` | **Test-only** (enable in `[dev-dependencies]`): `test_util::FakeProvider`, a login provider on `127.0.0.1` (discovery, JWKS, token endpoint with PKCE check, `authorize` plays the browser, `logout_token`, `sign`) for the tests of `bff` apps, and a public `bff::token::generate` |
+| `telemetry` | `TelemetryConfig`: JSON lines or one-line text, `EnvFilter`, from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info`) and `<PREFIX>_LOG_FORMAT` (`json` \| `text`); `from_lookup_with` takes the app's defaults (filter, format); `init` reports what it did (installed, installed without `log` bridge, already installed) |
 
 ## Quick start
 
@@ -44,6 +45,9 @@ let env = |k: &str| std::env::var(k).ok();
 TelemetryConfig::from_lookup("APP", env)?.init()?;      // APP_LOG (else RUST_LOG, else info), APP_LOG_FORMAT
 let proxies = TrustedProxies::from_lookup("APP", env)?; // APP_TRUSTED_PROXIES
 
+// The `ClientIp` extractor takes the proxies from the router state (`AppState` holds `proxies`):
+impl axum::extract::FromRef<AppState> for TrustedProxies { fn from_ref(s: &AppState) -> Self { s.proxies.clone() } }
+
 // The last `layer` call runs first: request id → trace → headers → no-store → CSRF → routes.
 let app = routes
     .layer(Csrf::header("x-requested-with", "crm")?.protect_prefix("/api/").exempt_path("/api/webhook"))
@@ -54,15 +58,22 @@ let app = routes
 axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await?;
 ```
 
-- **Client address:** `ClientIp` is an extractor (`TrustedProxies` in the state via `FromRef`);
+- **Client address:** `ClientIp` is an extractor (`TrustedProxies` in the state via the `FromRef` impl above);
   `proxies.resolver()` is the `client_ip` function for `StatusEndpoint` and `FeedEndpoint` of
-  `z40-fundament`, so their failure brake sees the same address.
+  `z40-fundament`, so their failure brake sees the same address. Router tests without a server add
+  `.layer(axum::extract::connect_info::MockConnectInfo(addr))`; both honour it.
 - **CSRF answer:** `403 {"code":"CSRF","message":"Anfrage abgelehnt (CSRF-Schutz). Bitte laden Sie die Seite
   neu."}` – the error form and German fixed texts of the `z40-fundament` endpoints. Apps with their own error
   shape pass `.rejection(|| …)`; apps with another check (e.g. a double-submit cookie) use `Csrf::check(…)`.
+- **CSRF header without a start-up error:** `Csrf::header_static(const { CsrfHeader::new("x-requested-with",
+  "crm") })` checks name and value at compile time (a safelisted name or an empty value does not compile), so
+  no fallback for a failed `Csrf::header(…)?` is needed.
 - **CSP per route group:** headers are only added when missing. A route that sets its own CSP keeps it (`X-Frame-Options` then follows its `frame-ancestors`); a
   router group gets its own `SecurityHeaders` layer before it is merged.
 - **HSTS** is the job of the edge proxy that terminates TLS.
+- **Log defaults of the app:** `TelemetryConfig::from_lookup_with("APP", env, Defaults { filter:
+  "info,sqlx=warn".into(), format: if dev { LogFormat::Text } else { LogFormat::Json } })` – used when
+  `APP_LOG` (and `RUST_LOG`) or `APP_LOG_FORMAT` are unset, so the app needs no wrapper.
 
 ## Login and sessions (`bff`)
 
@@ -116,7 +127,7 @@ let app = Router::new()
   does not reveal it and no server key is needed. No ID, access or refresh token is kept.
 - **Cookies:** `__Host-<name>_sid` (`HttpOnly; Secure; Path=/`, `SameSite=Strict` or `Lax`) and
   `__Host-<name>_login` (10 minutes, `SameSite=Lax`, single use). Only a plain-HTTP loopback redirect URI
-  (local development) drops `Secure` and the prefix.
+  (local development, see *Settings*) drops `Secure` and the prefix.
 - **Rotation:** every login gets a new 256-bit session id; the session of the cookie the browser brought is
   deleted.
 - **Lifetime:** idle and absolute timeout (`<PREFIX>_SESSION_IDLE_SECS`, `<PREFIX>_SESSION_MAX_SECS`); the
@@ -139,8 +150,30 @@ let app = Router::new()
   default, the TCP peer, warns once when that peer is a loopback or private address); without a client
   address all share one counter (warned once). `.without_login_limit()` if the app limits it itself.
   Residual risk: a flood from many /64s can use up the total and block new logins for everyone for the rest
-  of the minute (existing sessions are unaffected); counters are per instance (N instances → N× limit).
-- **Settings:** `BffConfig` is built with `from_lookup` or `BffConfig::new`; `build()` checks the URLs again.
+  of the minute (existing sessions are unaffected). Counters are per instance by default (N instances → N×
+  limit); `.login_limit_store(store.login_limit_store())` (`bff-mysql`, table `bff_login_limit` of the
+  schema) shares them between instances with the same rules, in full-minute windows; if that store fails,
+  the start fails (`500`) instead of passing unlimited. Run `MySqlLoginLimitStore::delete_expired` in the
+  worker as well.
+- **Settings:** `BffConfig` is built with `from_lookup`, `from_lookup_with` or `BffConfig::new`; `build()`
+  checks the URLs again. URLs are `https://`; plain-HTTP loopback URLs (`http://localhost:…`) are refused
+  unless the app allows them for development, and defaults it computes (client id, redirect URIs from its
+  public URL) go into `Defaults`:
+
+  ```rust,ignore
+  let config = BffConfig::from_lookup_with("AUTH", env, Defaults {
+      client_id: Some("crm".into()),
+      redirect_uri: Some(format!("{public_url}/api/auth/callback")),
+      post_logout_redirect_uri: Some(format!("{public_url}/")),
+      allow_loopback_http: app_env == "development",   // never a constant `true`
+  })?;
+  // or: BffConfig::new(issuer, client_id, secret, redirect_uri)?.allow_loopback_http(app_env == "development")
+  ```
+
+**Tests of the app:** with `test-util` in `[dev-dependencies]`, `FakeProvider::start("crm").await?` runs a
+login provider on plain-HTTP loopback (so the test configuration sets `allow_loopback_http`);
+`provider.authorize(&location, "user-1", Some("sid-1"), &["admin"], |_| {})` answers the app's redirect with
+the callback query to send back.
 
 Variables: [`docs/configuration.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/docs/configuration.md).
 

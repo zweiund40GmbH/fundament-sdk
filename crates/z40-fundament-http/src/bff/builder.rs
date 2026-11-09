@@ -2,7 +2,7 @@
 //! [`BffBuilder::build`].
 
 use super::cookies::Cookies;
-use super::limit::{ClientIpFn, LoginLimit};
+use super::limit::{ClientIpFn, DynLimitStore, LoginLimit, LoginLimitStore};
 use super::page;
 use super::store::DynStore;
 use super::{
@@ -29,6 +29,7 @@ pub struct BffBuilder<T> {
     options: Options,
     limit: Option<(u32, u32)>,
     client_ip: Option<ClientIpFn>,
+    limit_store: Option<Box<dyn DynLimitStore>>,
 }
 
 impl<T> std::fmt::Debug for BffBuilder<T> {
@@ -61,6 +62,7 @@ impl<T: SessionData> Bff<T> {
             scopes: vec!["profile".to_owned(), "email".to_owned()],
             limit,
             client_ip: None,
+            limit_store: None,
             error_page: Arc::new(page::default_page),
             options: Options::default(),
         }
@@ -95,10 +97,19 @@ impl<T: SessionData> BffBuilder<T> {
         self
     }
 
-    /// Turns the login limit off, e.g. when the app limits `GET <base>/login` itself (with shared
-    /// counters across instances).
+    /// Turns the login limit off, e.g. when the app limits `GET <base>/login` itself.
     pub fn without_login_limit(mut self) -> Self {
         self.limit = None;
+        self
+    }
+
+    /// Keeps the counters of the login limit in `store`, shared by all instances of the app (e.g.
+    /// `bff_mysql::MySqlLoginLimitStore`), instead of in this process: N instances then allow the
+    /// configured limit, not N times it. Same rules (per client address, IPv6 by /64, and in total;
+    /// `429` with `Retry-After`, nothing written); windows are full minutes (UTC). When the store fails,
+    /// the login start fails (`500` page) instead of passing unlimited.
+    pub fn login_limit_store(mut self, store: impl LoginLimitStore) -> Self {
+        self.limit_store = Some(Box::new(store));
         self
     }
 
@@ -152,7 +163,12 @@ impl<T: SessionData> BffBuilder<T> {
             Some((per_ip, total)) if per_ip == 0 || total == 0 => {
                 return Err(BffBuildError::LoginLimit);
             }
-            Some((per_ip, total)) => Some(LoginLimit::new(per_ip, total, self.client_ip)),
+            Some((per_ip, total)) => Some(LoginLimit::new(
+                per_ip,
+                total,
+                self.client_ip,
+                self.limit_store,
+            )),
             None => None,
         };
         Ok(Bff {

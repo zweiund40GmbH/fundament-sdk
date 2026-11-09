@@ -27,13 +27,14 @@
 //!
 //! **Login limit.** Each `GET <base>/login` writes a row before anyone is authenticated, so starts are
 //! limited per client address and in total (`<PREFIX>_LOGIN_RATE_PER_IP`, `<PREFIX>_LOGIN_RATE_TOTAL`,
-//! default 30 and 300 per minute, counted per process); more get `429` and write nothing. Behind a
-//! reverse proxy pass `TrustedProxies::resolver()` to [`BffBuilder::client_ip`] (the default, the TCP
-//! peer, warns once when the peer is a loopback or private address). The answer carries
-//! `Retry-After: 60`. Residual risk: a flood from many addresses (many /64s) can use up the total and
-//! block new logins for everyone until the window ends; existing sessions are unaffected. Counters are
-//! per instance, so N instances allow N times the limit. Run the store's cleanup for logins that never
-//! came back.
+//! default 30 and 300 per minute); more get `429` and write nothing. Behind a reverse proxy pass
+//! `TrustedProxies::resolver()` to [`BffBuilder::client_ip`] (the default, the TCP peer, warns once when
+//! the peer is a loopback or private address). The answer carries `Retry-After: 60`. Counters are per
+//! process by default, so N instances allow N times the limit; [`BffBuilder::login_limit_store`] shares
+//! them through a [`LoginLimitStore`] (`bff-mysql`: `MySqlLoginLimitStore`). Residual risk: a flood
+//! from many addresses (many /64s) can use up the total and block new logins for everyone until the
+//! window ends; existing sessions are unaffected. Run the store's cleanup for logins that never came
+//! back.
 //!
 //! **Back-channel logout** ends the sessions of the token's `sid`; if none has it, the sessions of its
 //! `sub` without `sid`; a token without `sid` ends all sessions of `sub`. A logout that arrives while a
@@ -91,11 +92,12 @@ mod session;
 mod store;
 pub mod timeouts;
 pub mod token;
+mod urls;
 
 pub use builder::BffBuilder;
-pub use config::{BffConfig, InvalidUrl};
+pub use config::{BffConfig, Defaults, InvalidUrl};
 pub use cookies::SameSite;
-pub use limit::ClientIpFn;
+pub use limit::{ClientIpFn, LoginLimitStore};
 pub use page::{LoginDenied, LoginFailure};
 pub use session::{Session, SessionRejection};
 pub use store::{PendingLogin, SessionRecord, SessionStore};

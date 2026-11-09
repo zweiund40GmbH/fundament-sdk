@@ -1,6 +1,6 @@
 //! Login round trips against the fake provider: cookies, `returnTo`, state and nonce checks, single use,
 //! rotation, the login hook and the session timeouts.
-#![cfg(feature = "bff")]
+#![cfg(feature = "test-util")]
 #![allow(clippy::unwrap_used)]
 
 mod common;
