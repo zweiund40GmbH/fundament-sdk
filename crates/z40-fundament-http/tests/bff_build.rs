@@ -1,5 +1,5 @@
 //! Login limit, settings checked at build time and the error page of a failed login.
-#![cfg(feature = "bff")]
+#![cfg(feature = "test-util")]
 #![allow(clippy::unwrap_used)]
 
 mod common;

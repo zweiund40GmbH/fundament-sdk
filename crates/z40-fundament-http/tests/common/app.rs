@@ -2,7 +2,6 @@
 //! `/api/me` behind the `Session` extractor, and a browser-like client (cookies by hand).
 
 use super::memory::MemoryStore;
-use super::oidc::{CLIENT_ID, Provider};
 use axum::body::Body;
 use axum::http::{HeaderMap, Method, Request, StatusCode, header};
 use axum::response::Response;
@@ -13,6 +12,7 @@ use tower::ServiceExt;
 use z40_fundament_http::bff::{
     Bff, BffBuilder, BffConfig, Defaults, LoginDenied, Session, SessionStore,
 };
+use z40_fundament_http::test_util::FakeProvider;
 
 /// The app's session data.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -21,12 +21,15 @@ pub struct User {
     pub roles: Vec<String>,
 }
 
+/// Client id of the app at the fake provider.
+pub const CLIENT_ID: &str = "crm";
+
 /// Text of the hook's refusal.
 pub const NO_ROLE: &str = "Ihr Konto hat keinen Zugang.";
 
 /// The test app over the store `S`.
 pub struct TestApp<S = MemoryStore> {
-    pub provider: Provider,
+    pub provider: FakeProvider,
     pub store: S,
     pub bff: Bff<User>,
     pub router: Router,
@@ -60,9 +63,9 @@ impl<S: SessionStore + Clone> TestApp<S> {
         vars: &[(&str, &str)],
         customize: impl FnOnce(BffBuilder<User>) -> BffBuilder<User>,
     ) -> Self {
-        let provider = Provider::start().await;
+        let provider = FakeProvider::start(CLIENT_ID).await.unwrap();
         let mut env: Vec<(String, String)> = vec![
-            ("AUTH_ISSUER".into(), provider.issuer.clone()),
+            ("AUTH_ISSUER".into(), provider.issuer().to_owned()),
             ("AUTH_CLIENT_ID".into(), CLIENT_ID.into()),
             ("AUTH_CLIENT_SECRET".into(), "s3cr3t".into()),
             (

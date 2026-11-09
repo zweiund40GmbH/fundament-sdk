@@ -55,8 +55,21 @@ impl std::fmt::Debug for TokenHash {
     }
 }
 
+/// A new random cookie value (32 bytes from the operating system, base64url). Public only with the
+/// **test-only** feature `test-util` (e.g. to put a session into a store directly in a test).
+#[cfg(feature = "test-util")]
+pub fn generate() -> Result<String, CryptoError> {
+    random_value()
+}
+
 /// A new random cookie value (32 bytes from the operating system, base64url).
+#[cfg(not(feature = "test-util"))]
 pub(crate) fn generate() -> Result<String, CryptoError> {
+    random_value()
+}
+
+/// The body of [`generate`], whose visibility depends on the feature `test-util`.
+fn random_value() -> Result<String, CryptoError> {
     let mut buf = [0u8; TOKEN_BYTES];
     SystemRandom::new()
         .fill(&mut buf)

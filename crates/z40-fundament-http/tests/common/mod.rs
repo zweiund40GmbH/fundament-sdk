@@ -77,11 +77,9 @@ pub fn capture_logs() -> (Capture, CaptureGuard) {
     (capture, CaptureGuard)
 }
 
-#[cfg(feature = "bff")]
+#[cfg(feature = "test-util")]
 pub mod app;
 #[cfg(feature = "bff-mysql")]
 pub mod db;
 #[cfg(feature = "bff")]
 pub mod memory;
-#[cfg(feature = "bff")]
-pub mod oidc;

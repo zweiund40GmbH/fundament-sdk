@@ -34,6 +34,9 @@ All notable changes to this project are documented in this file. The format is b
   redirect_uri, post_logout_redirect_uri, allow_loopback_http })` for defaults the app computes (used when
   the variable is unset or empty, URLs checked like the variables); the field and builder-style setter
   `BffConfig::allow_loopback_http`.
+- `z40-fundament-http`, feature `test-util` (new, test-only): `test_util::FakeProvider` (`start(client_id)`,
+  `issuer`, `authorize`, `logout_token`, `sign`), the fake login provider of this crate's own tests, for the
+  tests of `bff` apps; `bff::token::generate` is public with this feature.
 
 ### Fixed
 

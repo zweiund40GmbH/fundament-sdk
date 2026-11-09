@@ -22,6 +22,7 @@ helpers of [`z40-fundament`](https://crates.io/crates/z40-fundament).
 | `trace` | `trace::layer()`: span with method, route template (`<unmatched>` for unknown routes, raw path only on opt-in) and request id; status and latency at the end; never query strings, headers or bodies |
 | `bff` | Login and sessions for backend-for-frontend apps with [`z40-auth`](https://crates.io/crates/z40-auth): `Bff::router()` (`GET <base>/login?returnTo=`, `GET <base>/callback`, `POST <base>/logout`, `POST <base>/backchannel-logout`), `Session<T>` extractor, `SessionStore` trait, `BffConfig` (`<PREFIX>_ISSUER`, `<PREFIX>_CLIENT_ID`, …) |
 | `bff-mysql` | `MySqlSessionStore` (MariaDB/MySQL, sqlx) with table prefix, `schema/mysql-session.sql` and `delete_expired` for the worker |
+| `test-util` | **Test-only** (enable in `[dev-dependencies]`): `test_util::FakeProvider`, a login provider on `127.0.0.1` (discovery, JWKS, token endpoint with PKCE check, `authorize` plays the browser, `logout_token`, `sign`) for the tests of `bff` apps, and a public `bff::token::generate` |
 | `telemetry` | `TelemetryConfig`: JSON lines or one-line text, `EnvFilter`, from `<PREFIX>_LOG` (unset: `RUST_LOG`, then `info`) and `<PREFIX>_LOG_FORMAT` (`json` \| `text`); `from_lookup_with` takes the app's defaults (filter, format); `init` reports what it did (installed, installed without `log` bridge, already installed) |
 
 ## Quick start
@@ -164,6 +165,11 @@ let app = Router::new()
   })?;
   // or: BffConfig::new(issuer, client_id, secret, redirect_uri)?.allow_loopback_http(app_env == "development")
   ```
+
+**Tests of the app:** with `test-util` in `[dev-dependencies]`, `FakeProvider::start("crm").await?` runs a
+login provider on plain-HTTP loopback (so the test configuration sets `allow_loopback_http`);
+`provider.authorize(&location, "user-1", Some("sid-1"), &["admin"], |_| {})` answers the app's redirect with
+the callback query to send back.
 
 Variables: [`docs/configuration.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/docs/configuration.md).
 

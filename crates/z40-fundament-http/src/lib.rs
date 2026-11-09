@@ -25,6 +25,8 @@
 //! * `bff` → [`bff`] – login and sessions for backend-for-frontend apps: OIDC login with `z40-auth`,
 //!   session cookie, [`bff::Session`] extractor, logout and back-channel logout
 //! * `bff-mysql` → [`bff_mysql`] – MariaDB/MySQL session store
+//! * `test-util` → [`test_util`] – **test-only**: a fake login provider for the tests of `bff` apps and
+//!   a public [`bff::token::generate`]
 //!
 //! The layers are made for axum's `Router::layer`. A typical order (the last `layer` call runs first):
 //!
@@ -65,6 +67,9 @@ pub mod security_headers;
 #[cfg(feature = "telemetry")]
 #[cfg_attr(docsrs, doc(cfg(feature = "telemetry")))]
 pub mod telemetry;
+#[cfg(feature = "test-util")]
+#[cfg_attr(docsrs, doc(cfg(feature = "test-util")))]
+pub mod test_util;
 #[cfg(feature = "trace")]
 #[cfg_attr(docsrs, doc(cfg(feature = "trace")))]
 pub mod trace;

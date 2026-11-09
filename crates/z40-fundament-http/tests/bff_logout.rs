@@ -1,5 +1,5 @@
 //! Logout and back-channel logout against the fake provider, and the CSRF layer in front of the logout.
-#![cfg(feature = "bff")]
+#![cfg(feature = "test-util")]
 #![allow(clippy::unwrap_used)]
 
 mod common;
@@ -29,7 +29,7 @@ async fn logout_ends_the_session_without_a_token_in_the_url() {
     let url = Url::parse(body["logoutUrl"].as_str().unwrap()).unwrap();
     assert!(
         url.as_str()
-            .starts_with(&format!("{}/logout?", app.provider.issuer))
+            .starts_with(&format!("{}/logout?", app.provider.issuer()))
     );
     let q: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
     assert_eq!(q["post_logout_redirect_uri"], "https://crm.example.com/");
@@ -190,7 +190,7 @@ async fn back_channel_logout_by_sid_and_by_sub() {
     forged.push('x');
     let id_token_typ = app.provider.sign(
         "JWT",
-        &serde_json::json!({"iss": app.provider.issuer, "aud": "crm", "sid": "sid-b"}),
+        &serde_json::json!({"iss": app.provider.issuer(), "aud": "crm", "sid": "sid-b"}),
     );
     for token in [forged, id_token_typ, "a.b.c".to_owned()] {
         let res = post(&app, token).await;
