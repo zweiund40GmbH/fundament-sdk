@@ -279,7 +279,7 @@ Content-Type: application/json
  "variables": {"r": [{"__typename": "Site", "id": "s-1"}]}}
 ```
 
-Only `POST`. The subgraph keys are a list of their own (the same `name=sha256hex` form as the feed and status
+Only `POST`; other methods get `405` with `Allow: POST` (§4.5). The subgraph keys are a list of their own (the same `name=sha256hex` form as the feed and status
 keys); which callers get one is the app's choice. Failed attempts count at the **same failure brake** as the
 feed and the status endpoint of the app (§3.2).
 
@@ -291,19 +291,36 @@ feed and the status endpoint of the app (§3.2).
 3. **Body** – at most the body limit (default 64 KiB).
 4. **Request** – one JSON object in the GraphQL-over-HTTP form (`query`, optional `variables` and
    `operationName`). Batches (JSON arrays) are not accepted.
-5. **Document pre-check** (§4.2) on the parsed document, before the GraphQL engine validates it. A query that
-   does not parse is reported by the engine (`200` with `errors`).
-6. **Execution** with the engine limits (§4.3) and the read limits (§4.4).
+5. **Bracket scan** (§4.2) of the raw query text, before it is parsed.
+6. **Parsing** by the endpoint. A query that does not parse is rejected (`400 VALIDATION`); the engine never
+   parses the query again, so nothing that rewrites the query later can bypass the checks.
+7. **Document pre-check** (§4.2) on the parsed document, before the GraphQL engine validates it.
+8. **Execution** with the engine limits (§4.3), the read limits (§4.4) and the request deadline (default
+   10 s): when the deadline passes, the execution is stopped and the answer is `503 TIMEOUT` (§4.5).
 
 ### 4.2 Document pre-check
 
-The pre-check runs on the parsed document and costs time linear in its size: each fragment is measured once.
-It exists because GraphQL engines walk fragment spreads by expanding them: a few fragments that each spread the
-next one twice expand to 2^n selections, and the engine's own depth and complexity checks would block a thread
-before execution starts.
+Before parsing, one pass over the raw query text bounds the **bracket depth**: GraphQL parsers build nested
+values (`[[[…]]]`, `{a: {a: …}}`) recursively, and a few kilobytes of brackets would overflow the stack and
+abort the process. The pass counts `[`, `{` and `(` outside strings, block strings and comments and rejects a
+query in which more than 64 of them are open at once. Selection sets count too: a selection set at nesting
+level *n* (below) is *n* braces deep, so the bracket depth must be at least the nesting limit plus the depth of
+the argument values used there (the defaults leave 32 levels for arguments and their values). Unbalanced
+brackets are left to the parser.
+
+The pre-check then runs on the parsed document and costs time linear in its size: each fragment is measured
+once. It exists because GraphQL engines walk fragment spreads by expanding them: a few fragments that each
+spread the next one twice expand to 2^n selections, and the engine's own depth and complexity checks would
+block a thread before execution starts. Engines also compare the arguments of every pair of fields with the
+same response name, so the arguments are bounded as well.
 
 | Limit | Default | What counts |
 |---|---|---|
+| Bracket depth | 64 | `[`, `{`, `(` open at once in the raw query text, outside strings and comments. |
+| Arguments per field or directive | 32 | Arguments written on one field or one directive. |
+| Arguments in total | 1 000 | Arguments written in the document (fields and directives, not expanded). |
+| Directives per location | 8 | Directives on one operation, variable definition, field, fragment definition, spread or inline fragment. |
+| Variable definitions | 50 | Variables declared by one operation. |
 | Fragment definitions | 30 | Fragment definitions in the document. |
 | Fragment spreads | 100 | Spreads `...Name` written in the document (not expanded). |
 | Expanded selections | 2 000 | Selections (fields, inline fragments, spreads) of all operations together, with every spread replaced by its fragment. |
@@ -323,7 +340,9 @@ Further rules:
 ### 4.3 Engine limits
 
 - Query depth and complexity limited by the engine (the app chooses the values; defaults depth 10, complexity
-  1 000).
+  1 000); directives per location limited as in §4.2.
+- **No extensions that rewrite the query** (e.g. persisted queries): the endpoint checks the query it parsed,
+  not one an extension substitutes.
 - **No introspection:** `__schema` and `__type` answer `null`; `_service { sdl }` stays available for the
   router.
 - No mutations and no subscriptions in the subgraph schema.
@@ -348,10 +367,16 @@ Error bodies have the GraphQL error form and `Cache-Control: no-store`:
 | Status | `extensions.code` | Message | When |
 |---|---|---|---|
 | `400` | `BAD_REQUEST` | `Ungültige Anfrage.` | The body is unreadable, not JSON, a batch or not a GraphQL request. |
-| `400` | `VALIDATION` | `Ungültige Anfrage.` | The document pre-check (§4.2) rejected the document. Nothing is executed. |
+| `400` | `VALIDATION` | `Ungültige Anfrage.` | The query does not parse, or the document pre-check (§4.2) rejected it. Nothing is executed. |
+| `405` | `BAD_REQUEST` | `Ungültige Anfrage.` | Not `POST`. Header `Allow: POST`. |
 | `401` | `UNAUTHENTICATED` | `Anmeldung erforderlich.` | Missing or wrong key. Header `WWW-Authenticate: Bearer`. |
 | `413` | `VALIDATION` | `Anfrage zu groß.` | The body is larger than the limit. |
 | `429` | `RATE_LIMITED` | `Zu viele Fehlversuche. Bitte warten Sie eine Minute.` | Failure brake (§3.2). Header `Retry-After: 60`. |
+| `503` | `TIMEOUT` | `Zeitüberschreitung.` | The request deadline (§4.1) passed. Nothing of the partial result is sent. |
 
 The messages name no limit and no detail; the server logs which limit was hit. Everything after the
-pre-check is the engine's answer (`200`, with `data` and/or `errors`).
+pre-check is the engine's answer (`200`, with `data` and/or `errors`). An error of the engine itself – one
+without a `path`, such as a validation, depth or complexity error – that has no `extensions.code` gets
+`extensions.code = "VALIDATION"`; errors of fields (with a `path`) and errors with a code are passed on
+unchanged. A failed storage read of a resolver should end with `extensions.code = "INTERNAL"` and the message
+`Interner Fehler. Bitte versuchen Sie es später erneut.`, never with the text of the storage error.
