@@ -296,7 +296,10 @@ feed and the status endpoint of the app (§3.2).
    parses the query again, so nothing that rewrites the query later can bypass the checks.
 7. **Document pre-check** (§4.2) on the parsed document, before the GraphQL engine validates it.
 8. **Execution** with the engine limits (§4.3), the read limits (§4.4) and the request deadline (default
-   10 s): when the deadline passes, the execution is stopped and the answer is `503 TIMEOUT` (§4.5).
+   10 s): when the deadline passes, the execution is stopped and the answer is `503 TIMEOUT` (§4.5). The
+   deadline only takes effect where the execution waits (storage reads, other awaits); it does not stop the
+   synchronous work of the engine – parsing, validation, converting argument values. The limits of steps 5
+   and 7 are what bound that work.
 
 ### 4.2 Document pre-check
 
@@ -306,13 +309,17 @@ abort the process. The pass counts `[`, `{` and `(` outside strings, block strin
 query in which more than 64 of them are open at once. Selection sets count too: a selection set at nesting
 level *n* (below) is *n* braces deep, so the bracket depth must be at least the nesting limit plus the depth of
 the argument values used there (the defaults leave 32 levels for arguments and their values). Unbalanced
-brackets are left to the parser.
+brackets are left to the parser. A block string `"""` without a closing `"""` is rejected: a parser may read
+its opening quotes as an empty string followed by an ordinary one and parse the text after it, which the pass
+would have skipped. (The only documents this refuses are ones like `["""x"]`, a list of `""` and `"x"`.)
 
 The pre-check then runs on the parsed document and costs time linear in its size: each fragment is measured
 once. It exists because GraphQL engines walk fragment spreads by expanding them: a few fragments that each
 spread the next one twice expand to 2^n selections, and the engine's own depth and complexity checks would
-block a thread before execution starts. Engines also compare the arguments of every pair of fields with the
-same response name, so the arguments are bounded as well.
+block a thread before execution starts. Engines also compare the arguments of fields with the same response
+name, quadratic in the number of arguments per field, so the arguments are bounded as well. And they convert
+the argument values of every field instance – once per spread of its fragment – so the argument values are
+counted through the expansion too.
 
 | Limit | Default | What counts |
 |---|---|---|
@@ -324,6 +331,7 @@ same response name, so the arguments are bounded as well.
 | Fragment definitions | 30 | Fragment definitions in the document. |
 | Fragment spreads | 100 | Spreads `...Name` written in the document (not expanded). |
 | Expanded selections | 2 000 | Selections (fields, inline fragments, spreads) of all operations together, with every spread replaced by its fragment. |
+| Expanded argument values | 10 000 | Value nodes in the arguments of all fields and of the directives on fields, inline fragments and spreads, of all operations together, with every spread expanded. Each scalar, `null`, enum value, list and object counts 1, plus its entries. A variable counts the nodes of its value (from the request, else its declared default; the largest over the operations declaring it), because the engine copies the value into every field instance that uses it. |
 | Nesting | 32 | Levels of selection sets, the operation's own set being level 1; every field with a selection set, inline fragment and fragment spread opens a level (as the engine counts its recursion depth). At most 31 levels below the operation. |
 | `_entities` representations | 100 | Sum over all `_entities` fields of all operations. |
 
