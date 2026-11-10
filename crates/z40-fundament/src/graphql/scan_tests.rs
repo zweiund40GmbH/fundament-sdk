@@ -82,9 +82,35 @@ fn unbalanced_input_is_left_to_the_parser() {
         "{ a } }",
         "] ) }",
         "{ a(x: \"unterminated",
-        "{ a(x: \"\"\"open",
+        "{ a(x: \"bad\\\n[[[",
     ] {
         assert_eq!(scan(q), Ok(()), "{q}");
         assert!(parse_query(q).is_err(), "{q}");
     }
+}
+
+#[test]
+fn an_unterminated_block_string_is_rejected() {
+    // The parser reads `"""x"` as `""` and `"x"` and parses the brackets behind it.
+    let deep = format!("{}a{}", "[".repeat(3_000), "]".repeat(3_000));
+    let exploit = format!("{{ g(a: [\"\"\"x\" {deep}]) }}");
+    assert_eq!(scan(&exploit), Err(Violation::UnterminatedString));
+    assert_eq!(
+        scan("{ a(x: \"\"\"open"),
+        Err(Violation::UnterminatedString)
+    );
+    // The same at a small depth: the parser accepts it, with the brackets behind the quotes.
+    let small = "{ g(a: [\"\"\"x\" [[a]]]) }";
+    assert!(parse_query(small).is_ok());
+    assert_eq!(scan(small), Err(Violation::UnterminatedString));
+    // A closing `"""` later on ends it, for the parser as well.
+    let closed = "{ g(a: \"\"\"x\" [[[ \"\"\") }";
+    assert_eq!(scan(closed), Ok(()));
+    assert!(parse_query(closed).is_ok());
+}
+
+#[test]
+fn a_backslash_before_a_line_break_does_not_hide_the_next_line() {
+    let q = format!("{{ f(a: \"x\\\n{}\") }}", "[".repeat(100));
+    assert_eq!(scan(&q), Err(Violation::BracketDepth));
 }

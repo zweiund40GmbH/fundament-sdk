@@ -21,7 +21,9 @@ All notable changes to this project are documented in this file. The format is b
 - `graphql`: `scan_query` bounds the bracket depth of a raw query (default 64, outside strings, block strings and
   comments) before it is parsed – async-graphql's parser recurses without bound into nested value literals, and a
   few kilobytes of brackets abort the process by stack overflow. The subgraph endpoint calls it; call it on every
-  other async-graphql endpoint too. New `Violation::BracketDepth`.
+  other async-graphql endpoint too. New `Violation::BracketDepth`. A block string without its closing `"""` is
+  rejected (`Violation::UnterminatedString`): the parser reads its quotes as an empty string followed by an
+  ordinary one and parses the text behind it.
 - `graphql`: the pre-check bounds the written document: at most 32 arguments per field or directive, 1 000
   arguments in total, 8 directives per location (also the engine's `limit_directives`) and 50 variable
   definitions per operation (`Violation::Arguments`, `TotalArguments`, `Directives`, `Variables`; setters on

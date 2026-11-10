@@ -24,6 +24,10 @@ pub enum Violation {
     /// ([`super::scan_query`]).
     #[error("brackets nested too deep")]
     BracketDepth,
+    /// A block string `"""` without its closing `"""` in the raw query ([`super::scan_query`]): the parser
+    /// would read its quotes as an empty string and parse the text after it.
+    #[error("unterminated block string")]
+    UnterminatedString,
     /// More arguments on one field or directive than [`SubgraphLimits::max_arguments`].
     #[error("too many arguments on one field or directive")]
     Arguments,

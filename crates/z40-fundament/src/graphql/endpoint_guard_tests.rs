@@ -23,13 +23,20 @@ async fn deep_brackets_are_400_and_the_next_request_is_served() {
     assert_eq!(b["data"]["caller"], "router");
 }
 
-/// Lists, objects and a variable default nested `n` deep are refused with `400 VALIDATION`.
+/// Lists, objects, a variable default and lists behind an unterminated block string nested `n` deep are
+/// refused with `400 VALIDATION`.
 async fn assert_deep_is_rejected(router: &Router, n: usize) {
     for q in [
         format!("{{ caller(a: {}1{}) }}", "[".repeat(n), "]".repeat(n)),
         format!("{{ caller(a: {}1{}) }}", "{a:".repeat(n), "}".repeat(n)),
         format!(
             "query($v: Int = {}1{}) {{ caller }}",
+            "[".repeat(n),
+            "]".repeat(n)
+        ),
+        // The parser reads `"""x"` as `""` and `"x"` and parses the brackets behind it.
+        format!(
+            "{{ caller(a: [\"\"\"x\" {}1{}]) }}",
             "[".repeat(n),
             "]".repeat(n)
         ),
