@@ -34,6 +34,9 @@ status-client = ["credentials", "dep:reqwest", "dep:webpki-root-certs", "dep:tra
 feed-source = ["credentials", "dep:axum", "axum/query", "dep:tokio", "tokio/rt", "dep:tracing"]
 # Ready-made MariaDB/MySQL (sqlx) outbox, cursor assigner, retention and poll log for `feed-source`.
 feed-source-mysql = ["feed-source", "dep:sqlx"]
+# Serve a read-only GraphQL federation subgraph `POST /fundament/v1/graphql` with axum and async-graphql:
+# document pre-check, subgraph limits, key check, read budget and process-wide read limiter.
+graphql = ["credentials", "dep:async-graphql", "dep:async-graphql-value", "dep:axum", "dep:http-body-util", "dep:tokio", "tokio/sync", "dep:tracing"]
 # Helpers for the tests of apps (record keys, feed page builder, status document; with `status-client` also
 # `StatusPoller::plain_http_for_tests` and `StatusTarget::plain_http_for_tests`); for dev-dependencies.
 test-util = []
@@ -44,7 +47,15 @@ serde = { version = "1.0.219", features = ["derive"] }
 serde_json = "1.0.140"
 thiserror = "2.0.12"
 
+# The GraphQL engine of the subgraph; the same major/minor as the apps use (types appear in the API).
+async-graphql = { version = "7.2.1", optional = true, default-features = false }
+# The unresolved argument values of the parsed document (not re-exported by async-graphql), to count
+# `_entities` representations without cloning; part of async-graphql itself.
+async-graphql-value = { version = "7.2.1", optional = true }
 axum = { version = "0.8.4", optional = true, default-features = false, features = ["json", "tokio"] }
+# Reads the subgraph body with a limit and tells an oversized body (413) from a broken one (400); already
+# a dependency of axum.
+http-body-util = { version = "0.1.3", optional = true }
 # rustls (aws-lc-rs, like z40-auth) with the platform verifier: the platform store (which honours
 # SSL_CERT_FILE on Linux), so private CAs work. No OpenSSL.
 reqwest = { version = "0.13.5", optional = true, default-features = false, features = ["rustls", "query"] }

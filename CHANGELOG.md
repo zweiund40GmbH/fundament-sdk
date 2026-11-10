@@ -6,6 +6,19 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- `z40-fundament`, new feature `graphql`: a read-only GraphQL federation subgraph `POST /fundament/v1/graphql`
+  with async-graphql 7.2 (`docs/protocol.md` §4). `SubgraphEndpoint` checks failure brake → key → body
+  (64 KiB, `413`) → request (`400 BAD_REQUEST`) → document pre-check (`400 VALIDATION`) before the app's
+  executor runs, answers in GraphQL error shape and puts a `ReadBudget` and the `SubgraphCaller` into the
+  request data. `precheck` rejects fragment cycles (also unused ones), more than 30 fragment definitions or 100
+  spreads, more than 2 000 selections after expansion, nesting deeper than 32 and more than 100 `_entities`
+  representations (every occurrence, variables and their defaults) in time linear in the document; `Violation`
+  names the limit for logs. `SubgraphLimits` holds all limits (overridable) and sets the engine limits
+  (`apply`: depth, complexity, no introspection, `_service` kept). `ReadBudget` caps the reads of a request
+  (1 000) and `ReadLimiter` the concurrent reads of the process (3). `protocol::GRAPHQL_PATH`.
+
 ## [0.6.0] - 2026-11-09
 
 ### Changed (breaking)

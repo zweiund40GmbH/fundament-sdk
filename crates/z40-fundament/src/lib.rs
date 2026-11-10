@@ -29,6 +29,9 @@
 //!   [`feed_source::FeedSourceStore`] trait
 //! * `feed-source-mysql` → [`feed_source_mysql`] – sqlx/MariaDB outbox (also without a pool:
 //!   [`feed_source_mysql::OutboxWriter`]), cursor assigner, retention and poll log
+//! * `graphql` → [`graphql`] – a read-only GraphQL federation subgraph: [`graphql::SubgraphEndpoint`]
+//!   (brake → key → body → document pre-check → execution), [`graphql::precheck`],
+//!   [`graphql::SubgraphLimits`] and the read limits [`graphql::ReadBudget`] / [`graphql::ReadLimiter`]
 //! * `test-util` → [`test_util`] – helpers for the tests of apps (keys, feed pages, status documents)
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -46,8 +49,11 @@ pub mod feed_source;
 #[cfg_attr(docsrs, doc(cfg(feature = "feed-source-mysql")))]
 pub mod feed_source_mysql;
 pub mod fields;
+#[cfg(feature = "graphql")]
+#[cfg_attr(docsrs, doc(cfg(feature = "graphql")))]
+pub mod graphql;
 pub mod health;
-#[cfg(any(feature = "status", feature = "feed-source"))]
+#[cfg(any(feature = "status", feature = "feed-source", feature = "graphql"))]
 mod http;
 #[cfg(any(feature = "feed-consumer", feature = "status-client"))]
 mod http_client;

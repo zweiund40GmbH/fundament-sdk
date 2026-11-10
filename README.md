@@ -30,9 +30,10 @@ Ready-made MariaDB/MySQL implementations live behind their own feature. The seco
 | `status-client` | Reading the status of other apps: `StatusClient` (`GET /fundament/v1/status`, 2 s deadline, no redirects, 256 KiB limit, lenient parsing, fixed error texts), `StatusKeys` (one status key per target app), `StatusPoller` (one HTTP client for many apps, `fetch` and bounded parallel `poll_all`) |
 | `feed-source` | Serving a feed: `FeedEndpoint` (axum router for `GET /fundament/v1/events`: key check, failure brake, `on_failed_attempt` hook, query rules, `hasMore`), the `FeedSourceStore` and `SourceStatusStore` traits, `assign_cursors_once` for the worker; with `status` also `source_status` (`angebote`, `abrufer`, failed attempts) |
 | `feed-source-mysql` | `MySqlSource`: sqlx/MariaDB outbox written in the app's transaction (also without a pool: `OutboxWriter`; `occurred_at` from the database clock unless set), database errors classified (deadlock and lock wait retryable), cursor assigner after commit (`GET_LOCK`), retention that keeps the newest state per record, poll log; schema in [`schema/mysql-source.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql-source.sql) |
+| `graphql` | A read-only GraphQL federation subgraph with async-graphql: `SubgraphEndpoint` (axum router for `POST /fundament/v1/graphql`: failure brake, key check, body limit, errors in GraphQL shape), `precheck` (fragment cycles, spreads, expansion, nesting, `_entities` representations – linear in the document), `SubgraphLimits` (defaults, engine limits via `apply`), `ReadBudget` and `ReadLimiter` (reads per request, concurrent reads per process) |
 | `test-util` | Helpers for your tests (`[dev-dependencies]`): `test_util::key(n)`, `FeedPageBuilder` (pages that pass the page rules), `status_document(app, level)` |
 
-Planned: caching, GraphQL helpers and token credentials.
+Planned: caching and token credentials.
 
 ## HTTP groundwork: `z40-fundament-http`
 
@@ -202,9 +203,55 @@ A key is only ever sent to its own app. Parsing is lenient (unknown fields ignor
 document come from another app: show them as data, encoded for your output. TLS trusts the same roots as the
 feed consumer (built-in plus platform store / `SSL_CERT_FILE`).
 
+## Quick start: federation subgraph
+
+```toml
+[dependencies]
+z40-fundament = { version = "0.7", features = ["graphql"] }
+async-graphql = { version = "7.2", default-features = false }
+```
+
+```rust,ignore
+use async_graphql::{Context, EmptyMutation, EmptySubscription, ID, Object, Schema};
+use z40_fundament::graphql::{ReadBudget, SubgraphEndpoint, SubgraphLimits};
+
+struct Query;
+
+#[Object]
+impl Query {
+    #[graphql(entity)]
+    async fn site_by_id(&self, ctx: &Context<'_>, id: ID) -> async_graphql::Result<Option<Site>> {
+        let pool = ctx.data::<Pool>()?;
+        // Counts against the read budget of the request and waits for one of the process-wide permits.
+        Ok(ReadBudget::from_ctx(ctx)?.read(sites::get(pool, &id)).await??)
+    }
+}
+
+let limits = SubgraphLimits::default(); // body 64 KiB, 100 representations, 1 000 reads, 3 at once, …
+let schema = limits
+    .apply(Schema::build(Query, EmptyMutation, EmptySubscription)) // no introspection, `_service` kept
+    .data(pool)
+    .finish();
+// A key list of its own (name=sha256hex per caller, e.g. the federation router), e.g.
+// KeyList::parse(&std::env::var("APP_GRAPHQL_CLIENTS")?)?
+let subgraph = SubgraphEndpoint::new(graphql_clients, move |request, _budget| {
+    let schema = schema.clone();
+    async move { schema.execute(request).await }
+})
+.limits(limits)
+.brake(Arc::clone(&brake)); // the brake of the status and feed endpoints
+let app = axum::Router::new().merge(subgraph.router());
+axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await?;
+```
+
+The endpoint checks brake → key → body → request → document (`docs/protocol.md` §4) before the engine runs,
+so a request without a valid key never buffers a body, and a document with fragment cycles or an exponential
+expansion is refused in linear time. Use `EmptyMutation`: the subgraph is read-only. Route every storage read
+of a resolver through `ReadBudget::read` and do not nest reads (a read holds a permit until it finishes).
+
 ## Documentation
 
-- [`docs/protocol.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/docs/protocol.md) – the feed and status protocol (version 1)
+- [`docs/protocol.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/docs/protocol.md) – the feed, status and subgraph protocol (version 1)
 - [`docs/configuration.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/docs/configuration.md) – environment variables (generated, checked by a test)
 - API documentation: `just doc` or docs.rs ([z40-fundament](https://docs.rs/z40-fundament),
   [z40-fundament-http](https://docs.rs/z40-fundament-http))

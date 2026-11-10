@@ -1,6 +1,7 @@
-//! What the axum endpoints of this crate (status, feed source) share: the error form `{"code","message"}`
+//! What the axum endpoints of this crate (status, feed source, GraphQL subgraph) share: the error form `{"code","message"}`
 //! with its fixed texts (`docs/protocol.md` §3.2), `Cache-Control: no-store`, the client address for the
-//! failure brake and the bearer key check in the order brake → key.
+//! failure brake and the bearer key check in the order brake → key. The subgraph answers in GraphQL error
+//! shape but with the same statuses, texts and headers ([`Rejection`]).
 
 use crate::credentials::{FailureBrake, KeyList, bearer_token, shortened_for_logs};
 use axum::Json;
@@ -28,7 +29,7 @@ const MSG_UNAUTHENTICATED: &str = "Anmeldung erforderlich.";
 /// Message of `429`.
 const MSG_RATE_LIMITED: &str = "Zu viele Fehlversuche. Bitte warten Sie eine Minute.";
 /// Message of `500`.
-const MSG_INTERNAL: &str = "Interner Fehler. Bitte versuchen Sie es später erneut.";
+pub(crate) const MSG_INTERNAL: &str = "Interner Fehler. Bitte versuchen Sie es später erneut.";
 
 /// The default [`ClientIp`]: the address from `ConnectInfo<SocketAddr>` (set by
 /// `into_make_service_with_connect_info`).
@@ -54,11 +55,19 @@ pub(crate) fn json_ok<T: serde::Serialize>(body: T) -> Response {
 }
 
 /// An error answer `{"code","message"}`.
+#[cfg_attr(
+    not(any(feature = "status", feature = "feed-source")),
+    allow(dead_code)
+)]
 pub(crate) fn error(status: StatusCode, code: &str, message: &str) -> Response {
     no_store((status, Json(json!({ "code": code, "message": message }))).into_response())
 }
 
 /// `500 INTERNAL` (details are logged by the caller, never sent).
+#[cfg_attr(
+    not(any(feature = "status", feature = "feed-source")),
+    allow(dead_code)
+)]
 pub(crate) fn internal() -> Response {
     error(StatusCode::INTERNAL_SERVER_ERROR, "INTERNAL", MSG_INTERNAL)
 }
@@ -78,6 +87,10 @@ pub(crate) struct Gate {
 }
 
 /// Result of [`Gate::check`].
+#[cfg_attr(
+    not(any(feature = "status", feature = "feed-source")),
+    allow(dead_code)
+)]
 pub(crate) enum Checked<'a> {
     /// The name of the accepted key.
     Caller(&'a str),
@@ -114,20 +127,14 @@ impl Gate {
         IpAddr::V4(Ipv4Addr::UNSPECIFIED)
     }
 
-    /// Brake (`429` with `Retry-After: 60`) → key (`401` with `WWW-Authenticate: Bearer`, counted). The
-    /// key is never logged; the client address only shortened.
-    pub fn check<'a>(&'a self, parts: &Parts) -> Checked<'a> {
+    /// Brake → key, without building an answer (endpoints with another error shape build their own from
+    /// the [`Rejection`]). A missing or wrong key is counted at the brake; the key is never logged, the
+    /// client address only shortened.
+    pub fn verify<'a>(&'a self, parts: &Parts) -> Result<&'a str, Rejection> {
         let ip = self.address(parts);
         let now = Instant::now();
         if self.brake.is_blocked(ip, now) {
-            let mut res = error(
-                StatusCode::TOO_MANY_REQUESTS,
-                "RATE_LIMITED",
-                MSG_RATE_LIMITED,
-            );
-            res.headers_mut()
-                .insert(header::RETRY_AFTER, HeaderValue::from_static("60"));
-            return Checked::Braked(res);
+            return Err(Rejection::Braked);
         }
         let caller = parts
             .headers
@@ -136,18 +143,77 @@ impl Gate {
             .and_then(bearer_token)
             .and_then(|k| self.keys.verify(k));
         if let Some(caller) = caller {
-            return Checked::Caller(caller);
+            return Ok(caller);
         }
         self.brake.record_failure(ip, now);
         let net = shortened_for_logs(ip);
         tracing::debug!(%net, endpoint = self.what, "request with missing or wrong key");
-        let mut res = error(
-            StatusCode::UNAUTHORIZED,
-            "UNAUTHENTICATED",
-            MSG_UNAUTHENTICATED,
-        );
+        Err(Rejection::Unauthenticated)
+    }
+
+    /// [`Gate::verify`] with the answers in the form `{"code","message"}`: `429` with `Retry-After: 60`,
+    /// `401` with `WWW-Authenticate: Bearer`.
+    #[cfg_attr(
+        not(any(feature = "status", feature = "feed-source")),
+        allow(dead_code)
+    )]
+    pub fn check<'a>(&'a self, parts: &Parts) -> Checked<'a> {
+        match self.verify(parts) {
+            Ok(caller) => Checked::Caller(caller),
+            Err(r) => {
+                let mut res = error(r.status(), r.code(), r.message());
+                r.add_header(&mut res);
+                match r {
+                    Rejection::Braked => Checked::Braked(res),
+                    Rejection::Unauthenticated => Checked::Unauthenticated(res),
+                }
+            }
+        }
+    }
+}
+
+/// Why [`Gate::verify`] refused a request; status, code, message and header are the same for every
+/// endpoint, only the shape of the body differs.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Rejection {
+    /// The address is braked (not counted again).
+    Braked,
+    /// Missing or wrong key (counted at the brake).
+    Unauthenticated,
+}
+
+impl Rejection {
+    /// `429` or `401`.
+    pub fn status(self) -> StatusCode {
+        match self {
+            Self::Braked => StatusCode::TOO_MANY_REQUESTS,
+            Self::Unauthenticated => StatusCode::UNAUTHORIZED,
+        }
+    }
+
+    /// `RATE_LIMITED` or `UNAUTHENTICATED`.
+    pub fn code(self) -> &'static str {
+        match self {
+            Self::Braked => "RATE_LIMITED",
+            Self::Unauthenticated => "UNAUTHENTICATED",
+        }
+    }
+
+    /// The fixed text (`docs/protocol.md` §3.2).
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::Braked => MSG_RATE_LIMITED,
+            Self::Unauthenticated => MSG_UNAUTHENTICATED,
+        }
+    }
+
+    /// Sets `Retry-After: 60` or `WWW-Authenticate: Bearer` on `res`.
+    pub fn add_header(self, res: &mut Response) {
+        let (name, value) = match self {
+            Self::Braked => (header::RETRY_AFTER, "60"),
+            Self::Unauthenticated => (header::WWW_AUTHENTICATE, "Bearer"),
+        };
         res.headers_mut()
-            .insert(header::WWW_AUTHENTICATE, HeaderValue::from_static("Bearer"));
-        Checked::Unauthenticated(res)
+            .insert(name, HeaderValue::from_static(value));
     }
 }

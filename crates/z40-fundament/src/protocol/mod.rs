@@ -16,6 +16,8 @@ pub const PROTOCOL_VERSION: u32 = 1;
 pub const EVENTS_PATH: &str = "/fundament/v1/events";
 /// Path of the status document of an app.
 pub const STATUS_PATH: &str = "/fundament/v1/status";
+/// Path of the read-only GraphQL federation subgraph of an app (`docs/protocol.md` §4).
+pub const GRAPHQL_PATH: &str = "/fundament/v1/graphql";
 /// Largest `limit` a feed request may ask for.
 pub const MAX_PAGE_LIMIT: u32 = 500;
 
