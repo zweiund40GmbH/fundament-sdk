@@ -28,6 +28,11 @@ All notable changes to this project are documented in this file. The format is b
   arguments in total, 8 directives per location (also the engine's `limit_directives`) and 50 variable
   definitions per operation (`Violation::Arguments`, `TotalArguments`, `Directives`, `Variables`; setters on
   `SubgraphLimits`).
+- `graphql`: the pre-check counts the value nodes of the arguments of fields and of directives on selections
+  through the expansion – a variable by the nodes of its value or default – and rejects more than 10 000
+  (`SubgraphLimits::values`, `Violation::Values`): the engine converts the argument values at every field
+  instance, so a large literal in a fragment spread many times cost seconds of synchronous work that the
+  deadline does not stop. The deadline only takes effect at await points; this is now documented.
 - `graphql`: `SubgraphEndpoint` parses the query itself and rejects one that does not parse with
   `400 VALIDATION` (fail closed; the engine never parses again); runs the execution under a deadline
   (`SubgraphLimits::timeout`, default 10 s, then `503 TIMEOUT` `Zeitüberschreitung.`); answers other methods

@@ -17,13 +17,16 @@ use std::time::Duration;
 ///   the same response name, and walks directives and variables per location;
 /// * **fragments, spreads, selections, nesting** – the engine expands fragments at every spread; these
 ///   keep every walk over the expanded document small ([`super::precheck`]);
+/// * **argument values** – the engine converts the argument values of every field instance, once per
+///   spread; counted through the expansion like the selections;
 /// * **representations** – each `_entities` representation costs reads, and the engine's complexity
 ///   counts the field only once, however many representations it gets;
 /// * **reads** – a hard cap at run time, because a representation can fan out into lists of any size;
 /// * **concurrent reads** – bounds how many pool connections subgraph traffic takes from the app;
 /// * **depth, complexity** – the engine's own limits, as a second line after the pre-check;
 /// * **timeout** – a deadline for the whole execution, so a slow storage cannot hold a request (and its
-///   read permits) for long.
+///   read permits) for long. It only takes effect at await points: synchronous parsing, validation and
+///   value conversion run to their end, and only the limits above bound them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SubgraphLimits {
     body: usize,
@@ -35,6 +38,7 @@ pub struct SubgraphLimits {
     fragments: usize,
     spreads: usize,
     selections: usize,
+    values: usize,
     nesting: usize,
     representations: usize,
     reads: usize,
@@ -56,6 +60,7 @@ impl Default for SubgraphLimits {
             fragments: 30,
             spreads: 100,
             selections: 2_000,
+            values: 10_000,
             nesting: 32,
             representations: 100,
             reads: 1_000,
@@ -121,6 +126,13 @@ impl SubgraphLimits {
     /// Most selections of all operations together with every spread expanded (default 2 000).
     pub fn selections(mut self, n: usize) -> Self {
         self.selections = n;
+        self
+    }
+
+    /// Most value nodes in the arguments of fields and of directives on selections, of all operations
+    /// together with every spread expanded (default 10 000). A variable counts the nodes of its value.
+    pub fn values(mut self, n: usize) -> Self {
+        self.values = n;
         self
     }
 
@@ -216,6 +228,11 @@ impl SubgraphLimits {
     /// See [`SubgraphLimits::selections`].
     pub fn max_selections(&self) -> usize {
         self.selections
+    }
+
+    /// See [`SubgraphLimits::values`].
+    pub fn max_values(&self) -> usize {
+        self.values
     }
 
     /// See [`SubgraphLimits::nesting`].

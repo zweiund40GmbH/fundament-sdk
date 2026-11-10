@@ -75,6 +75,30 @@ async fn many_arguments_are_refused_within_milliseconds() {
 }
 
 #[tokio::test]
+async fn a_large_literal_spread_many_times_is_refused_quickly() {
+    // 900 instances of an object with 6 000 keys: the engine would convert it at every instance, for
+    // more than a second of synchronous work that no deadline stops.
+    let object: Vec<String> = (0..6_000).map(|i| format!("k{i}:1")).collect();
+    let q = format!(
+        "{{ {} }} fragment F1 on Query {{ {} }} fragment L on Query {{ caller(a: {{{}}}) }}",
+        "...F1 ".repeat(30),
+        "...L ".repeat(30),
+        object.join(",")
+    );
+    let b = body(&q);
+    assert!(b.len() < 64 * 1024, "within the body limit: {}", b.len());
+    let router = endpoint().router();
+    let start = Instant::now();
+    let (status, _, b) = send(&router, request(Some("good-key"), b)).await;
+    let elapsed = start.elapsed();
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(code(&b), "VALIDATION");
+    // Reading the 47 KB body and parsing it dominate; unoptimised they take a few dozen milliseconds.
+    let bound = if cfg!(debug_assertions) { 300 } else { 50 };
+    assert!(elapsed < Duration::from_millis(bound), "{elapsed:?}");
+}
+
+#[tokio::test]
 async fn the_deadline_answers_503_and_frees_the_permits() {
     let ep = endpoint().limits(SubgraphLimits::default().timeout(Duration::from_millis(50)));
     let limiter = ep.read_limiter().clone();
