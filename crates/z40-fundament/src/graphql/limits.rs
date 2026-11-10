@@ -2,6 +2,7 @@
 //! read budget enforce, and the engine limits [`SubgraphLimits::apply`] sets on the schema.
 
 use async_graphql::SchemaBuilder;
+use std::time::Duration;
 
 /// The limits of one subgraph. [`Default`] gives the values of `docs/protocol.md` §4; every setter
 /// overrides one of them.
@@ -9,16 +10,28 @@ use async_graphql::SchemaBuilder;
 /// Each limit closes one way a single small request could make the server work hard:
 ///
 /// * **body** – the smaller the body, the less the pre-check and the engine have to read;
+/// * **bracket depth** – the parser builds nested values recursively; deep brackets would overflow the
+///   stack ([`super::scan_query`]). Selection sets count too, so keep it at least the nesting limit plus the
+///   depth of the argument values a client needs (defaults 64 = 32 + 32);
+/// * **arguments, directives, variables** – the engine compares the arguments of every pair of fields with
+///   the same response name, and walks directives and variables per location;
 /// * **fragments, spreads, selections, nesting** – the engine expands fragments at every spread; these
 ///   keep every walk over the expanded document small ([`super::precheck`]);
 /// * **representations** – each `_entities` representation costs reads, and the engine's complexity
 ///   counts the field only once, however many representations it gets;
 /// * **reads** – a hard cap at run time, because a representation can fan out into lists of any size;
 /// * **concurrent reads** – bounds how many pool connections subgraph traffic takes from the app;
-/// * **depth, complexity** – the engine's own limits, as a second line after the pre-check.
+/// * **depth, complexity** – the engine's own limits, as a second line after the pre-check;
+/// * **timeout** – a deadline for the whole execution, so a slow storage cannot hold a request (and its
+///   read permits) for long.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SubgraphLimits {
     body: usize,
+    bracket_depth: usize,
+    arguments: usize,
+    total_arguments: usize,
+    directives: usize,
+    variables: usize,
     fragments: usize,
     spreads: usize,
     selections: usize,
@@ -28,12 +41,18 @@ pub struct SubgraphLimits {
     concurrent_reads: usize,
     depth: usize,
     complexity: usize,
+    timeout: Duration,
 }
 
 impl Default for SubgraphLimits {
     fn default() -> Self {
         Self {
             body: 64 * 1024,
+            bracket_depth: 64,
+            arguments: 32,
+            total_arguments: 1_000,
+            directives: 8,
+            variables: 50,
             fragments: 30,
             spreads: 100,
             selections: 2_000,
@@ -43,6 +62,7 @@ impl Default for SubgraphLimits {
             concurrent_reads: 3,
             depth: 10,
             complexity: 1_000,
+            timeout: Duration::from_secs(10),
         }
     }
 }
@@ -51,6 +71,38 @@ impl SubgraphLimits {
     /// Largest request body in bytes (default 64 KiB); larger → `413`.
     pub fn body(mut self, bytes: usize) -> Self {
         self.body = bytes;
+        self
+    }
+
+    /// Most brackets `[`, `{`, `(` open at once in the raw query text, outside strings and comments
+    /// (default 64), see [`super::scan_query`].
+    pub fn bracket_depth(mut self, n: usize) -> Self {
+        self.bracket_depth = n;
+        self
+    }
+
+    /// Most arguments written on one field or one directive (default 32).
+    pub fn arguments(mut self, n: usize) -> Self {
+        self.arguments = n;
+        self
+    }
+
+    /// Most arguments written in one document, fields and directives together (default 1 000).
+    pub fn total_arguments(mut self, n: usize) -> Self {
+        self.total_arguments = n;
+        self
+    }
+
+    /// Most directives on one location (operation, variable definition, field, fragment definition,
+    /// spread, inline fragment; default 8). Also the engine's limit, set by [`SubgraphLimits::apply`].
+    pub fn directives(mut self, n: usize) -> Self {
+        self.directives = n;
+        self
+    }
+
+    /// Most variable definitions of one operation (default 50).
+    pub fn variables(mut self, n: usize) -> Self {
+        self.variables = n;
         self
     }
 
@@ -109,9 +161,46 @@ impl SubgraphLimits {
         self
     }
 
+    /// The deadline of one request's execution (default 10 s); when it passes, the endpoint stops the
+    /// execution and answers `503 TIMEOUT`.
+    pub fn timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = timeout;
+        self
+    }
+
     /// See [`SubgraphLimits::body`].
     pub fn max_body(&self) -> usize {
         self.body
+    }
+
+    /// See [`SubgraphLimits::bracket_depth`].
+    pub fn max_bracket_depth(&self) -> usize {
+        self.bracket_depth
+    }
+
+    /// See [`SubgraphLimits::arguments`].
+    pub fn max_arguments(&self) -> usize {
+        self.arguments
+    }
+
+    /// See [`SubgraphLimits::total_arguments`].
+    pub fn max_total_arguments(&self) -> usize {
+        self.total_arguments
+    }
+
+    /// See [`SubgraphLimits::directives`].
+    pub fn max_directives(&self) -> usize {
+        self.directives
+    }
+
+    /// See [`SubgraphLimits::variables`].
+    pub fn max_variables(&self) -> usize {
+        self.variables
+    }
+
+    /// See [`SubgraphLimits::timeout`].
+    pub fn max_duration(&self) -> Duration {
+        self.timeout
     }
 
     /// See [`SubgraphLimits::fragments`].
@@ -160,47 +249,24 @@ impl SubgraphLimits {
     }
 
     /// Sets the engine limits on a subgraph schema: depth and complexity, the engine's recursion depth
-    /// (to the nesting limit), introspection off (`__schema` and `__type` answer `null`, `_service { sdl }`
+    /// (to the nesting limit), directives per location, introspection off (`__schema` and `__type` answer `null`, `_service { sdl }`
     /// keeps working) and federation on (`_service` also without entity resolvers).
     ///
     /// Build the subgraph schema with `EmptyMutation` and `EmptySubscription`: then it cannot change
-    /// anything, whatever a caller sends.
+    /// anything, whatever a caller sends. Do not register extensions that rewrite the query (persisted
+    /// queries, `prepare_request` hooks setting another query): the endpoint checks the document it parsed
+    /// itself and hands exactly that one to the engine.
     pub fn apply<Q, M, S>(&self, builder: SchemaBuilder<Q, M, S>) -> SchemaBuilder<Q, M, S> {
         builder
             .limit_depth(self.depth)
             .limit_complexity(self.complexity)
             .limit_recursive_depth(self.nesting)
+            .limit_directives(self.directives)
             .disable_introspection()
             .enable_federation()
     }
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn defaults_follow_the_protocol() {
-        let l = SubgraphLimits::default();
-        assert_eq!(l.max_body(), 65_536);
-        assert_eq!(l.max_fragments(), 30);
-        assert_eq!(l.max_spreads(), 100);
-        assert_eq!(l.max_selections(), 2_000);
-        assert_eq!(l.max_nesting(), 32);
-        assert_eq!(l.max_representations(), 100);
-        assert_eq!(l.max_reads(), 1_000);
-        assert_eq!(l.max_concurrent_reads(), 3);
-        assert_eq!(l.max_depth(), 10);
-        assert_eq!(l.max_complexity(), 1_000);
-    }
-
-    #[test]
-    fn setters_override_one_value() {
-        let l = SubgraphLimits::default()
-            .representations(5)
-            .concurrent_reads(0);
-        assert_eq!(l.max_representations(), 5);
-        assert_eq!(l.max_concurrent_reads(), 1, "0 would block every read");
-        assert_eq!(l.max_reads(), 1_000);
-    }
-}
+#[path = "limits_tests.rs"]
+mod tests;

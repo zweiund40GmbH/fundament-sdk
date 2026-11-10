@@ -10,6 +10,7 @@
 
 use super::SubgraphLimits;
 use super::representations::count_representations;
+use super::written::check_written;
 use async_graphql::Variables;
 use async_graphql::parser::types::{ExecutableDocument, Selection, SelectionSet};
 use std::collections::{HashMap, HashSet};
@@ -19,6 +20,22 @@ use std::collections::{HashMap, HashSet};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum Violation {
+    /// More brackets open at once in the raw query than [`SubgraphLimits::max_bracket_depth`]
+    /// ([`super::scan_query`]).
+    #[error("brackets nested too deep")]
+    BracketDepth,
+    /// More arguments on one field or directive than [`SubgraphLimits::max_arguments`].
+    #[error("too many arguments on one field or directive")]
+    Arguments,
+    /// More arguments in the document than [`SubgraphLimits::max_total_arguments`].
+    #[error("too many arguments")]
+    TotalArguments,
+    /// More directives on one location than [`SubgraphLimits::max_directives`].
+    #[error("too many directives on one location")]
+    Directives,
+    /// More variable definitions in one operation than [`SubgraphLimits::max_variables`].
+    #[error("too many variable definitions")]
+    Variables,
     /// More fragment definitions than [`SubgraphLimits::max_fragments`].
     #[error("too many fragment definitions")]
     Fragments,
@@ -40,8 +57,9 @@ pub enum Violation {
 }
 
 /// Checks `doc` with the request's `variables` against `limits` (`docs/protocol.md` §4.2). `Ok` means
-/// the document is acyclic and, with every spread expanded, small and shallow enough, and asks for at most
-/// the allowed number of representations. Spreads of unknown fragments are left to the engine's
+/// the written document has few enough spreads, arguments, directives and variables, is acyclic and, with
+/// every spread expanded, small and shallow enough, and asks for at most the allowed number of
+/// representations. Run [`super::scan_query`] on the query text before parsing it. Spreads of unknown fragments are left to the engine's
 /// validation. Pure: no IO, nothing is cloned from `variables`.
 pub fn precheck(
     doc: &ExecutableDocument,
@@ -51,14 +69,7 @@ pub fn precheck(
     if doc.fragments.len() > limits.max_fragments() {
         return Err(Violation::Fragments);
     }
-    let sets = doc
-        .operations
-        .iter()
-        .map(|(_, op)| &op.node.selection_set.node)
-        .chain(doc.fragments.values().map(|f| &f.node.selection_set.node));
-    if count_spreads(sets, limits.max_spreads()) > limits.max_spreads() {
-        return Err(Violation::Spreads);
-    }
+    check_written(doc, limits)?;
     let mut m = Measure {
         doc,
         limits,
@@ -83,26 +94,6 @@ pub fn precheck(
         return Err(Violation::Representations);
     }
     Ok(())
-}
-
-/// Fragment spreads written in `sets` (not following them), counted with an explicit stack (no
-/// recursion, however deep the document) and stopping once the count exceeds `cap`.
-fn count_spreads<'a>(sets: impl Iterator<Item = &'a SelectionSet>, cap: usize) -> usize {
-    let mut stack: Vec<&SelectionSet> = sets.collect();
-    let mut n = 0usize;
-    while let Some(set) = stack.pop() {
-        for item in &set.items {
-            match &item.node {
-                Selection::Field(f) => stack.push(&f.node.selection_set.node),
-                Selection::InlineFragment(f) => stack.push(&f.node.selection_set.node),
-                Selection::FragmentSpread(_) => n = n.saturating_add(1),
-            }
-        }
-        if n > cap {
-            break;
-        }
-    }
-    n
 }
 
 /// Size of an expanded selection set: its selections (recursively) and how many levels of selection sets

@@ -117,3 +117,26 @@ async fn from_ctx_finds_the_budget_of_the_request() {
     let res = schema.execute("{ reads }").await;
     assert_eq!(res.errors[0].message, MSG_INTERNAL);
 }
+
+#[tokio::test]
+async fn a_failed_read_becomes_a_generic_internal_error() {
+    let budget = ReadBudget::new(2, ReadLimiter::new(1));
+    let ok = budget.read_or_internal(async { Ok::<_, String>(7) }).await;
+    assert_eq!(ok.unwrap(), 7);
+    let e = budget
+        .read_or_internal(async { Err::<u8, _>("table site_secret missing on db-host") })
+        .await
+        .unwrap_err();
+    assert_eq!(e.message, MSG_INTERNAL);
+    assert!(!e.message.contains("site_secret"));
+    let code = e.extensions.as_ref().and_then(|x| x.get("code")).cloned();
+    assert_eq!(code, Some(async_graphql::Value::from("INTERNAL")));
+    // Beyond the budget the read is refused as before, not as internal.
+    let e = budget
+        .read_or_internal(async { Ok::<u8, String>(1) })
+        .await
+        .unwrap_err();
+    let code = e.extensions.as_ref().and_then(|x| x.get("code")).cloned();
+    assert_eq!(code, Some(async_graphql::Value::from("VALIDATION")));
+    assert_eq!(budget.reads(), 2);
+}

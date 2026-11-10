@@ -1,16 +1,18 @@
 //! `POST /fundament/v1/graphql` as an axum router (`docs/protocol.md` §4). Order of the checks: brake
 //! (`429`) → subgraph key (`401`, counted) → body (`413` over the limit, `400` unreadable) → GraphQL request
-//! (`400`) → document pre-check (`400`) → execution by the app (`200`). Errors in GraphQL error shape with
-//! `extensions.code`; every answer carries `Cache-Control: no-store`.
+//! (`400`) → bracket scan, parsing and document pre-check (`400`) → execution by the app under the deadline
+//! (`200`, `503` on expiry). Other methods get `405`. Errors in GraphQL error shape with `extensions.code`;
+//! every answer carries `Cache-Control: no-store`.
 
-use super::{ReadBudget, ReadLimiter, SubgraphLimits, precheck};
+use super::{ReadBudget, ReadLimiter, SubgraphLimits, Violation, precheck, scan_query};
 use crate::credentials::{FailureBrake, KeyList};
 use crate::http::{FailedAttemptHook, Gate, Rejection, json_ok, no_store};
 use crate::protocol::GRAPHQL_PATH;
 use async_graphql::parser::parse_query;
+use async_graphql::parser::types::ExecutableDocument;
 use axum::extract::Request;
-use axum::http::StatusCode;
 use axum::http::request::Parts;
+use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::post;
 use axum::{Json, Router};
@@ -20,8 +22,10 @@ use std::future::Future;
 use std::net::IpAddr;
 use std::sync::Arc;
 
-/// Message of `400` (unreadable body, no GraphQL request, rejected document).
+/// Message of `400` (unreadable body, no GraphQL request, rejected document) and `405`.
 const MSG_INVALID: &str = "Ungültige Anfrage.";
+/// Message of `503` (the request deadline passed).
+const MSG_TIMEOUT: &str = "Zeitüberschreitung.";
 /// Message of `413`.
 const MSG_TOO_LARGE: &str = "Anfrage zu groß.";
 
@@ -44,6 +48,14 @@ impl SubgraphCaller {
 /// in its request data – and the same budget (e.g. to log [`ReadBudget::reads`]); usually it just runs
 /// `schema.execute(request)`. Build the schema with the same limits ([`SubgraphLimits::apply`]) and with
 /// `EmptyMutation`, so the subgraph cannot change anything.
+///
+/// **The checked document is the executed one.** The endpoint parses the query itself and hands the
+/// parsed document to the engine, which does not parse again. Do not register async-graphql extensions
+/// that rewrite the query (persisted queries, `prepare_request` hooks): they would run a document the
+/// pre-check never saw.
+///
+/// **Engine errors** without a path (validation, depth, complexity) and without `extensions.code` get
+/// `extensions.code = "VALIDATION"`; field errors and errors with a code are passed on unchanged.
 ///
 /// **Client address and brake.** As for [`crate::status::StatusEndpoint`]: serve the app with
 /// `into_make_service_with_connect_info::<SocketAddr>()`, or behind a reverse proxy pass
@@ -121,7 +133,8 @@ where
         self
     }
 
-    /// A router with the single route `POST /fundament/v1/graphql`, to merge into the app's router.
+    /// A router with the single route `POST /fundament/v1/graphql`, to merge into the app's router. Other
+    /// methods on the path get `405` with `Allow: POST`.
     pub fn router<S: Clone + Send + Sync + 'static>(self) -> Router<S> {
         let ep = Arc::new(self);
         Router::new().route(
@@ -129,7 +142,8 @@ where
             post(move |req: Request| {
                 let ep = Arc::clone(&ep);
                 async move { ep.handle(req).await }
-            }),
+            })
+            .fallback(|| async { method_not_allowed() }),
         )
     }
 
@@ -153,19 +167,29 @@ where
         let Ok(mut request) = serde_json::from_slice::<async_graphql::Request>(&bytes) else {
             return graphql_error(StatusCode::BAD_REQUEST, "BAD_REQUEST", MSG_INVALID);
         };
-        // A query that does not parse is left to the engine, which reports the syntax error.
-        if let Ok(doc) = parse_query(&request.query) {
-            if let Err(v) = precheck(&doc, &request.variables, &self.limits) {
-                tracing::debug!(caller, violation = %v, "subgraph document rejected");
+        match checked_document(&request, &self.limits) {
+            Ok(doc) => request.set_parsed_query(doc),
+            Err(v) => {
+                match v {
+                    Some(v) => {
+                        tracing::debug!(caller, violation = %v, "subgraph document rejected")
+                    }
+                    None => tracing::debug!(caller, "subgraph query does not parse"),
+                }
                 return graphql_error(StatusCode::BAD_REQUEST, "VALIDATION", MSG_INVALID);
             }
-            request.set_parsed_query(doc);
         }
         let budget = ReadBudget::from_limits(&self.limits, self.limiter.clone());
         let request = request
             .data(budget.clone())
             .data(SubgraphCaller(caller.to_owned()));
-        let response = (self.execute)(request, budget.clone()).await;
+        let run = (self.execute)(request, budget.clone());
+        // On expiry the future is dropped: running reads stop and give their permits back.
+        let Ok(mut response) = tokio::time::timeout(self.limits.max_duration(), run).await else {
+            tracing::warn!(caller, reads = budget.reads(), "subgraph request timed out");
+            return graphql_error(StatusCode::SERVICE_UNAVAILABLE, "TIMEOUT", MSG_TIMEOUT);
+        };
+        tag_engine_errors(&mut response);
         tracing::debug!(caller, reads = budget.reads(), "subgraph request");
         json_ok(response)
     }
@@ -183,6 +207,38 @@ where
     }
 }
 
+/// The parsed document of `request` if it passes the bracket scan, parses and passes the pre-check; else
+/// the broken limit (`None`: it does not parse). The scan keeps the parser's recursion shallow; parsing
+/// here – failing closed – and handing the document on means the engine runs exactly what was checked.
+fn checked_document(
+    request: &async_graphql::Request,
+    limits: &SubgraphLimits,
+) -> Result<ExecutableDocument, Option<Violation>> {
+    scan_query(&request.query, limits).map_err(Some)?;
+    let doc = parse_query(&request.query).map_err(|_| None)?;
+    precheck(&doc, &request.variables, limits).map_err(Some)?;
+    Ok(doc)
+}
+
+/// Gives the engine's own errors (those without a path) `extensions.code = "VALIDATION"` unless they
+/// carry a code already; field errors (with a path) are the app's and stay as they are.
+fn tag_engine_errors(response: &mut async_graphql::Response) {
+    for e in response.errors.iter_mut().filter(|e| e.path.is_empty()) {
+        let ext = e.extensions.get_or_insert_with(Default::default);
+        if ext.get("code").is_none() {
+            ext.set("code", "VALIDATION");
+        }
+    }
+}
+
+/// `405` for every method but `POST`, with `Allow: POST`.
+fn method_not_allowed() -> Response {
+    let mut res = graphql_error(StatusCode::METHOD_NOT_ALLOWED, "BAD_REQUEST", MSG_INVALID);
+    res.headers_mut()
+        .insert(header::ALLOW, HeaderValue::from_static("POST"));
+    res
+}
+
 /// An error answer `{"errors":[{"message","extensions":{"code"}}]}` with `Cache-Control: no-store`.
 fn graphql_error(status: StatusCode, code: &str, message: &str) -> Response {
     let body = json!({ "errors": [{ "message": message, "extensions": { "code": code } }] });
@@ -192,3 +248,7 @@ fn graphql_error(status: StatusCode, code: &str, message: &str) -> Response {
 #[cfg(test)]
 #[path = "endpoint_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "endpoint_guard_tests.rs"]
+mod guard_tests;

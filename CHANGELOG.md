@@ -18,6 +18,21 @@ All notable changes to this project are documented in this file. The format is b
   names the limit for logs. `SubgraphLimits` holds all limits (overridable) and sets the engine limits
   (`apply`: depth, complexity, no introspection, `_service` kept). `ReadBudget` caps the reads of a request
   (1 000) and `ReadLimiter` the concurrent reads of the process (3). `protocol::GRAPHQL_PATH`.
+- `graphql`: `scan_query` bounds the bracket depth of a raw query (default 64, outside strings, block strings and
+  comments) before it is parsed – async-graphql's parser recurses without bound into nested value literals, and a
+  few kilobytes of brackets abort the process by stack overflow. The subgraph endpoint calls it; call it on every
+  other async-graphql endpoint too. New `Violation::BracketDepth`.
+- `graphql`: the pre-check bounds the written document: at most 32 arguments per field or directive, 1 000
+  arguments in total, 8 directives per location (also the engine's `limit_directives`) and 50 variable
+  definitions per operation (`Violation::Arguments`, `TotalArguments`, `Directives`, `Variables`; setters on
+  `SubgraphLimits`).
+- `graphql`: `SubgraphEndpoint` parses the query itself and rejects one that does not parse with
+  `400 VALIDATION` (fail closed; the engine never parses again); runs the execution under a deadline
+  (`SubgraphLimits::timeout`, default 10 s, then `503 TIMEOUT` `Zeitüberschreitung.`); answers other methods
+  with `405` (`Allow: POST`, GraphQL error shape, `no-store`); and gives engine errors without a path and without a
+  code `extensions.code = "VALIDATION"`.
+- `graphql`: `internal(err)` and `ReadBudget::read_or_internal` log a storage error and answer with a generic
+  `INTERNAL` error, so its text never reaches the client.
 
 ## [0.6.0] - 2026-11-09
 

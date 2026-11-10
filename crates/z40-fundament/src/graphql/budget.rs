@@ -11,6 +11,7 @@
 use super::SubgraphLimits;
 use crate::http::MSG_INTERNAL;
 use async_graphql::{Context, ErrorExtensions};
+use std::fmt::Display;
 use std::future::Future;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -117,6 +118,26 @@ impl ReadBudget {
         })?;
         Ok(read.await)
     }
+
+    /// [`ReadBudget::read`] for a storage read that can fail: a failure is logged and answered with the
+    /// generic [`internal`] error, so the text of a storage error never reaches the client.
+    pub async fn read_or_internal<F, T, E>(&self, read: F) -> async_graphql::Result<T>
+    where
+        F: Future<Output = Result<T, E>>,
+        E: Display,
+    {
+        self.read(read).await?.map_err(internal)
+    }
+}
+
+/// The error of a resolver whose storage (or any other internal step) failed: logs `err` and returns
+/// a generic error with `extensions.code = "INTERNAL"` and the fixed text of `docs/protocol.md` §4.5.
+///
+/// Use it instead of `?` on storage errors: async-graphql turns every `Display` error into an error whose
+/// message is that text, which may name tables, columns or hosts.
+pub fn internal(err: impl Display) -> async_graphql::Error {
+    tracing::error!(error = %err, "subgraph resolver failed");
+    error("INTERNAL", MSG_INTERNAL)
 }
 
 /// An async-graphql error with `extensions.code`.

@@ -5,7 +5,9 @@
 //!
 //! Runs only on a document that passed the shape checks of [`super::precheck`] (acyclic, bounded nesting),
 //! so the recursion is bounded. A fragment's count is computed once per operation (the variables differ
-//! between operations) and added at every spread.
+//! between operations) and added at every spread. The work is bounded rather than strictly linear: an
+//! operation walks its own selections and, once each, the fragments it reaches – only operations with a
+//! spread reach any – so at most (written spreads + 1) × the size of the document.
 
 use async_graphql::parser::types::{
     ExecutableDocument, Field, OperationDefinition, Selection, SelectionSet,

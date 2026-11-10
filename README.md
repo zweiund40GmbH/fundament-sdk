@@ -30,7 +30,7 @@ Ready-made MariaDB/MySQL implementations live behind their own feature. The seco
 | `status-client` | Reading the status of other apps: `StatusClient` (`GET /fundament/v1/status`, 2 s deadline, no redirects, 256 KiB limit, lenient parsing, fixed error texts), `StatusKeys` (one status key per target app), `StatusPoller` (one HTTP client for many apps, `fetch` and bounded parallel `poll_all`) |
 | `feed-source` | Serving a feed: `FeedEndpoint` (axum router for `GET /fundament/v1/events`: key check, failure brake, `on_failed_attempt` hook, query rules, `hasMore`), the `FeedSourceStore` and `SourceStatusStore` traits, `assign_cursors_once` for the worker; with `status` also `source_status` (`angebote`, `abrufer`, failed attempts) |
 | `feed-source-mysql` | `MySqlSource`: sqlx/MariaDB outbox written in the app's transaction (also without a pool: `OutboxWriter`; `occurred_at` from the database clock unless set), database errors classified (deadlock and lock wait retryable), cursor assigner after commit (`GET_LOCK`), retention that keeps the newest state per record, poll log; schema in [`schema/mysql-source.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql-source.sql) |
-| `graphql` | A read-only GraphQL federation subgraph with async-graphql: `SubgraphEndpoint` (axum router for `POST /fundament/v1/graphql`: failure brake, key check, body limit, errors in GraphQL shape), `precheck` (fragment cycles, spreads, expansion, nesting, `_entities` representations – linear in the document), `SubgraphLimits` (defaults, engine limits via `apply`), `ReadBudget` and `ReadLimiter` (reads per request, concurrent reads per process) |
+| `graphql` | A read-only GraphQL federation subgraph with async-graphql: `SubgraphEndpoint` (axum router for `POST /fundament/v1/graphql`: failure brake, key check, body limit, deadline, errors in GraphQL shape), `scan_query` (bracket depth of the raw query, against parser stack overflows – for every async-graphql endpoint), `precheck` (arguments, directives, variables, fragment cycles, spreads, expansion, nesting, `_entities` representations – linear in the document), `SubgraphLimits` (defaults, engine limits via `apply`), `ReadBudget` and `ReadLimiter` (reads per request, concurrent reads per process), `internal` (generic error for storage failures) |
 | `test-util` | Helpers for your tests (`[dev-dependencies]`): `test_util::key(n)`, `FeedPageBuilder` (pages that pass the page rules), `status_document(app, level)` |
 
 Planned: caching and token credentials.
@@ -223,7 +223,8 @@ impl Query {
     async fn site_by_id(&self, ctx: &Context<'_>, id: ID) -> async_graphql::Result<Option<Site>> {
         let pool = ctx.data::<Pool>()?;
         // Counts against the read budget of the request and waits for one of the process-wide permits.
-        Ok(ReadBudget::from_ctx(ctx)?.read(sites::get(pool, &id)).await??)
+        // A storage error is logged and answered with a generic `INTERNAL` error, never with its text.
+        ReadBudget::from_ctx(ctx)?.read_or_internal(sites::get(pool, &id)).await
     }
 }
 
@@ -244,10 +245,28 @@ let app = axum::Router::new().merge(subgraph.router());
 axum::serve(listener, app.into_make_service_with_connect_info::<std::net::SocketAddr>()).await?;
 ```
 
-The endpoint checks brake → key → body → request → document (`docs/protocol.md` §4) before the engine runs,
-so a request without a valid key never buffers a body, and a document with fragment cycles or an exponential
-expansion is refused in linear time. Use `EmptyMutation`: the subgraph is read-only. Route every storage read
-of a resolver through `ReadBudget::read` and do not nest reads (a read holds a permit until it finishes).
+The endpoint checks brake → key → body → request → bracket depth → parsing → document (`docs/protocol.md` §4)
+before the engine runs, so a request without a valid key never buffers a body, and a document with deep
+brackets, many arguments, fragment cycles or an exponential expansion is refused in linear time. It parses the
+query itself and hands the parsed document to the engine: do not register extensions that rewrite the query
+(persisted queries). The whole execution runs under a deadline (default 10 s, then `503 TIMEOUT`). Use
+`EmptyMutation`: the subgraph is read-only. Route every storage read of a resolver through
+`ReadBudget::read_or_internal` (or `ReadBudget::read` and `graphql::internal` for the error) – a plain `?` on a
+storage error sends its text to the client – and do not nest reads (a read holds a permit until it finishes).
+
+**On every other async-graphql endpoint of the app, too,** call `scan_query` before handing a query to
+async-graphql: its parser recurses without bound into nested values (`[[[…]]]`, `{a: {a: …}}`), and a few
+kilobytes of brackets overflow the stack and abort the process.
+
+```rust,ignore
+use z40_fundament::graphql::{SubgraphLimits, scan_query};
+
+let limits = SubgraphLimits::default(); // bracket depth 64
+if scan_query(&request.query, &limits).is_err() {
+    return bad_request(); // the app's own 400
+}
+let response = schema.execute(request).await;
+```
 
 ## Documentation
 

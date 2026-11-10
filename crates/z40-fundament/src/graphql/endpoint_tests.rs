@@ -19,6 +19,19 @@ impl Query {
             .map_or("?", |c| c.name())
             .to_string()
     }
+
+    /// A field error without a code.
+    async fn failing(&self) -> async_graphql::Result<i32> {
+        Err(async_graphql::Error::new("kaputt"))
+    }
+
+    /// A read that takes far longer than any test deadline.
+    async fn slow(&self, ctx: &async_graphql::Context<'_>) -> async_graphql::Result<i32> {
+        ReadBudget::from_ctx(ctx)?
+            .read(tokio::time::sleep(std::time::Duration::from_secs(30)))
+            .await?;
+        Ok(1)
+    }
 }
 
 /// The future of the test executor.
@@ -26,7 +39,7 @@ type BoxFuture = std::pin::Pin<Box<dyn Future<Output = async_graphql::Response> 
 /// The test executor, boxed so helpers can name the endpoint type.
 type Exec = Box<dyn Fn(async_graphql::Request, ReadBudget) -> BoxFuture + Send + Sync>;
 
-fn endpoint() -> SubgraphEndpoint<Exec> {
+pub(super) fn endpoint() -> SubgraphEndpoint<Exec> {
     let keys = KeyList::parse(&key_entry("router", "good-key").unwrap()).unwrap();
     let schema = SubgraphLimits::default()
         .apply(Schema::build(Query, EmptyMutation, EmptySubscription))
@@ -38,7 +51,7 @@ fn endpoint() -> SubgraphEndpoint<Exec> {
     SubgraphEndpoint::new(keys, exec)
 }
 
-fn request(key: Option<&str>, body: impl Into<Body>) -> HttpRequest<Body> {
+pub(super) fn request(key: Option<&str>, body: impl Into<Body>) -> HttpRequest<Body> {
     let mut b = HttpRequest::builder()
         .method(Method::POST)
         .uri(GRAPHQL_PATH)
@@ -49,7 +62,7 @@ fn request(key: Option<&str>, body: impl Into<Body>) -> HttpRequest<Body> {
     b.body(body.into()).unwrap()
 }
 
-async fn send(
+pub(super) async fn send(
     router: &Router,
     req: HttpRequest<Body>,
 ) -> (StatusCode, axum::http::HeaderMap, Value) {
@@ -61,7 +74,7 @@ async fn send(
     (status, headers, body)
 }
 
-fn code(body: &Value) -> &str {
+pub(super) fn code(body: &Value) -> &str {
     body["errors"][0]["extensions"]["code"]
         .as_str()
         .unwrap_or("")
@@ -135,7 +148,7 @@ async fn unreadable_requests_are_400_bad_request() {
 }
 
 #[tokio::test]
-async fn a_rejected_document_is_400_validation_and_a_syntax_error_is_the_engines() {
+async fn a_rejected_document_is_400_validation_and_so_is_a_syntax_error() {
     let router = endpoint().router();
     let cyclic = r#"{"query":"{ ...A } fragment A on Query { ...A }"}"#;
     let (status, _, b) = send(&router, request(Some("good-key"), cyclic)).await;
@@ -148,9 +161,13 @@ async fn a_rejected_document_is_400_validation_and_a_syntax_error_is_the_engines
         request(Some("good-key"), r#"{"query":"{ caller"}"#),
     )
     .await;
-    assert_eq!(status, StatusCode::OK);
-    assert!(b["errors"][0]["message"].is_string());
-    assert!(b.get("data").is_none_or(Value::is_null));
+    assert_eq!(
+        status,
+        StatusCode::BAD_REQUEST,
+        "fail closed, the engine never parses"
+    );
+    assert_eq!(code(&b), "VALIDATION");
+    assert_eq!(b["errors"][0]["message"], "Ungültige Anfrage.");
 }
 
 #[tokio::test]
@@ -160,8 +177,12 @@ async fn only_post_is_routed_and_limits_rebuild_the_limiter() {
         .uri(GRAPHQL_PATH)
         .body(Body::empty())
         .unwrap();
-    let res = router.oneshot(req).await.unwrap();
-    assert_eq!(res.status(), StatusCode::METHOD_NOT_ALLOWED);
+    let (status, headers, body) = send(&router, req).await;
+    assert_eq!(status, StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(headers[header::ALLOW], "POST");
+    assert_eq!(headers[header::CACHE_CONTROL], "no-store");
+    assert_eq!(code(&body), "BAD_REQUEST");
+    assert_eq!(body["errors"][0]["message"], "Ungültige Anfrage.");
 
     let ep = endpoint().limits(SubgraphLimits::default().concurrent_reads(5));
     assert_eq!(ep.read_limiter().available(), 5);
