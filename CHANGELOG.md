@@ -46,7 +46,7 @@ All notable changes to this project are documented in this file. The format is b
   (`Violation::UnusedFragment`), names longer than 256 bytes (`SubgraphLimits::name_length`,
   `Violation::NameLength`) and documents with more than 20 field-merge conflicts counted as the engine reports
   them (`Violation::Conflicts`). An answer carries at most 20 errors, the rest replaced by one note
-  `Weitere Fehler ausgelassen.` (`SubgraphLimits::errors`). The default body limit is 16 KiB (was 64 KiB):
+  `Weitere Fehler ausgelassen.` (`SubgraphLimits::errors`). The default body limit is 16 KiB:
   parsing a worst-case body of 64 KiB took about 75 ms of synchronous work.
 
 ## [0.6.0] - 2026-11-09

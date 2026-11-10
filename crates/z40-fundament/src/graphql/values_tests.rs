@@ -11,7 +11,8 @@ use std::time::{Duration, Instant};
 /// The argument values of the first field of the first operation of `q`.
 fn first_field(q: &str, vars: serde_json::Value) -> usize {
     let doc = parse_query(q).unwrap();
-    let sizes = variable_sizes(&doc, &Variables::from_json(vars));
+    let vars = Variables::from_json(vars);
+    let sizes = variable_sizes(&doc, &vars);
     let (_, op) = doc.operations.iter().next().unwrap();
     let Selection::Field(f) = &op.node.selection_set.node.items[0].node else {
         panic!("not a field")
@@ -143,4 +144,25 @@ fn the_value_limit_can_be_set() {
         check_with("{ a(x: [1, 2], y: 3) }", json!({}), &limits),
         Err(Violation::Values)
     );
+}
+
+#[test]
+fn undeclared_request_variables_count_too() {
+    // The engine validates the request value at every argument that uses the variable, declared or not.
+    let fields = "f(b: $v) ".repeat(1_000);
+    let q = format!("{{ {fields} }}");
+    let objects = json!((0..2_700).map(|_| json!({})).collect::<Vec<_>>());
+    assert_eq!(
+        check_vars(&q, json!({ "v": objects })),
+        Err(Violation::Values)
+    );
+    let directives = format!("{{ {} }}", "x @skip(if: $v) ".repeat(8));
+    let large = json!((0..2_000).collect::<Vec<_>>());
+    assert_eq!(
+        check_vars(&directives, json!({ "v": large })),
+        Err(Violation::Values)
+    );
+    // A small value stays within the limit.
+    assert_eq!(check_vars(&q, json!({ "v": 1 })), Ok(()));
+    assert_eq!(first_field("{ f(a: $u) }", json!({ "u": [1, 2, 3] })), 4);
 }

@@ -11,14 +11,19 @@ use async_graphql::{Name, Positioned, Value, Variables};
 use async_graphql_value::Value as InputValue;
 use std::collections::HashMap;
 
-/// The value nodes of each variable declared in `doc`: of the request's value, else of the declared
-/// default, else 1 (`null`). A name declared by several operations gets the largest of its sizes (the
-/// engine only uses the executed operation; counting the largest is simple and conservative).
+/// The value nodes of each variable: every variable of the request with the size of its value (also when
+/// no operation declares it – the engine's argument validation still copies the request value into every
+/// argument that uses it), and every variable declared in `doc` with the size of the request's value, else
+/// of the declared default, else 1 (`null`). A name declared by several operations gets the largest of its
+/// sizes (the engine only uses the executed operation; counting the largest is simple and conservative).
 pub(super) fn variable_sizes<'a>(
     doc: &'a ExecutableDocument,
-    variables: &Variables,
+    variables: &'a Variables,
 ) -> HashMap<&'a str, usize> {
-    let mut sizes = HashMap::new();
+    let mut sizes: HashMap<&'a str, usize> = variables
+        .iter()
+        .map(|(name, value)| (name.as_str(), const_nodes(value)))
+        .collect();
     for (_, op) in doc.operations.iter() {
         for def in &op.node.variable_definitions {
             let name = def.node.name.node.as_str();
@@ -54,7 +59,7 @@ pub(super) fn directive_values(
 }
 
 /// Nodes of a written value: 1 for each scalar, `null`, enum value, list and object, plus its entries;
-/// a variable its size in `variables` (1 if undeclared – the engine rejects it).
+/// a variable its size in `variables` (1 if it is neither in the request nor declared).
 fn input_nodes(value: &InputValue, variables: &HashMap<&str, usize>) -> usize {
     let mut n = 0usize;
     let mut stack = vec![value];
