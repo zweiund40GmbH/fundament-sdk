@@ -8,8 +8,14 @@
 //! are rejected, so every later walk over the expanded document is cheap. The argument values are added up
 //! through the expansion the same way, because the engine converts them at every field instance. Its own
 //! recursion never goes deeper than the nesting limit.
+//!
+//! Every fragment must be used: the engine validates unused fragments as well, and they would be walked
+//! without being counted. So each fragment body counts toward the totals through its spreads. The
+//! engine's field-merge rule walks fragments per written selection set instead of per spread; its
+//! conflicts are counted separately ([`super::merge`]).
 
 use super::SubgraphLimits;
+use super::merge::check_conflicts;
 use super::representations::count_representations;
 use super::values::{argument_values, directive_values, variable_sizes};
 use super::written::check_written;
@@ -48,9 +54,19 @@ pub enum Violation {
     /// More fragment spreads than [`SubgraphLimits::max_spreads`].
     #[error("too many fragment spreads")]
     Spreads,
-    /// A fragment spreads itself, directly or through others (also in unused fragments).
+    /// A fragment spreads itself, directly or through others.
     #[error("fragment cycle")]
     Cycle,
+    /// A fragment definition no operation reaches through its spreads.
+    #[error("unused fragment")]
+    UnusedFragment,
+    /// A name longer than [`SubgraphLimits::max_name_length`] bytes.
+    #[error("name too long")]
+    NameLength,
+    /// More conflicts of fields with the same response name than [`SubgraphLimits::max_errors`], counted
+    /// as the engine reports them.
+    #[error("too many field-merge conflicts")]
+    Conflicts,
     /// More selections after expansion than [`SubgraphLimits::max_selections`].
     #[error("too many selections after expanding fragments")]
     Selections,
@@ -66,9 +82,10 @@ pub enum Violation {
 }
 
 /// Checks `doc` with the request's `variables` against `limits` (`docs/protocol.md` §4.2). `Ok` means
-/// the written document has few enough spreads, arguments, directives and variables, is acyclic and, with
-/// every spread expanded, small and shallow enough with few enough argument values, and asks for at most
-/// the allowed number of representations. Run [`super::scan_query`] on the query text before parsing it.
+/// the written document has few enough spreads, arguments, directives and variables and only short names,
+/// is acyclic, uses every fragment and, with every spread expanded, is small and shallow enough with few
+/// enough argument values, has few enough field-merge conflicts and asks for at most the allowed number of
+/// representations. Run [`super::scan_query`] on the query text before parsing it.
 /// Spreads of unknown fragments are left to the engine's validation. Pure: no IO, nothing is cloned from
 /// `variables`.
 pub fn precheck(
@@ -94,11 +111,16 @@ pub fn precheck(
         total.values = total.values.saturating_add(size.values);
         m.check(total)?;
     }
-    // Unused fragments too: the engine validates every definition, cycles there must not reach it.
-    for name in doc.fragments.keys() {
-        m.fragment(name, 1)?;
+    // A fragment not measured through an operation is unused: the engine would walk it uncounted.
+    if doc
+        .fragments
+        .keys()
+        .any(|name| !m.done.contains_key(name.as_str()))
+    {
+        return Err(Violation::UnusedFragment);
     }
-    // Only now: the counting expands spreads and relies on an acyclic, bounded document.
+    // Only now: both walks below rely on an acyclic, bounded document whose fragments are all counted.
+    check_conflicts(doc, limits)?;
     if count_representations(doc, variables, limits.max_representations())
         > limits.max_representations()
     {

@@ -1,4 +1,4 @@
-//! Tests of the written counts: arguments, directives, variables and spreads.
+//! Tests of the written counts: arguments, directives, variables, spreads and the length of names.
 
 use super::*;
 use async_graphql::parser::parse_query;
@@ -117,4 +117,39 @@ fn spreads_are_counted_as_written() {
         ),
         Err(Violation::Spreads)
     );
+}
+
+/// Documents that each carry `name` in one place that names something: operation, field, alias,
+/// argument, directive and its argument, fragment definition and spread, variable definition, its type and
+/// its use, and type conditions.
+fn named(name: &str) -> Vec<String> {
+    vec![
+        format!("query {name} {{ a }}"),
+        format!("{{ {name} }}"),
+        format!("{{ {name}: a }}"),
+        format!("{{ a({name}: 1) }}"),
+        format!("{{ a @{name} }}"),
+        format!("{{ a @d({name}: 1) }}"),
+        format!("query @{name} {{ a }}"),
+        format!("{{ a }} fragment {name} on Query {{ a }}"),
+        format!("{{ ...{name} }}"),
+        format!("query(${name}: Int) {{ a }}"),
+        format!("query($v: [{name}!]!) {{ a }}"),
+        format!("{{ a(x: [{{ k: ${name} }}]) }}"),
+        format!("{{ a }} fragment F on {name} {{ a }}"),
+        format!("{{ ... on {name} {{ a }} }}"),
+    ]
+}
+
+#[test]
+fn every_kind_of_name_is_bounded() {
+    let ok = format!("n{}", "a".repeat(255));
+    let long = format!("n{}", "a".repeat(256));
+    for (fits, too_long) in named(&ok).iter().zip(named(&long).iter()) {
+        assert_eq!(check(fits), Ok(()), "{fits}");
+        assert_eq!(check(too_long), Err(Violation::NameLength), "{too_long}");
+    }
+    let short = SubgraphLimits::default().name_length(3);
+    assert_eq!(check_with("{ abc }", &short), Ok(()));
+    assert_eq!(check_with("{ abcd }", &short), Err(Violation::NameLength));
 }

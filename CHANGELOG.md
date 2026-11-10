@@ -10,9 +10,9 @@ All notable changes to this project are documented in this file. The format is b
 
 - `z40-fundament`, new feature `graphql`: a read-only GraphQL federation subgraph `POST /fundament/v1/graphql`
   with async-graphql 7.2 (`docs/protocol.md` §4). `SubgraphEndpoint` checks failure brake → key → body
-  (64 KiB, `413`) → request (`400 BAD_REQUEST`) → document pre-check (`400 VALIDATION`) before the app's
+  (16 KiB, `413`) → request (`400 BAD_REQUEST`) → document pre-check (`400 VALIDATION`) before the app's
   executor runs, answers in GraphQL error shape and puts a `ReadBudget` and the `SubgraphCaller` into the
-  request data. `precheck` rejects fragment cycles (also unused ones), more than 30 fragment definitions or 100
+  request data. `precheck` rejects fragment cycles, more than 30 fragment definitions or 100
   spreads, more than 2 000 selections after expansion, nesting deeper than 32 and more than 100 `_entities`
   representations (every occurrence, variables and their defaults) in time linear in the document; `Violation`
   names the limit for logs. `SubgraphLimits` holds all limits (overridable) and sets the engine limits
@@ -40,6 +40,14 @@ All notable changes to this project are documented in this file. The format is b
   code `extensions.code = "VALIDATION"`.
 - `graphql`: `internal(err)` and `ReadBudget::read_or_internal` log a storage error and answer with a generic
   `INTERNAL` error, so its text never reaches the client.
+- `graphql`: the engine's rule for fields with the same response name runs once per written selection set,
+  also for unused fragments, and builds every conflict message before any other limit applies – a 9 KB document
+  cost 0.8 s of synchronous work and a 422 MB answer. The pre-check now rejects fragments no operation uses
+  (`Violation::UnusedFragment`), names longer than 256 bytes (`SubgraphLimits::name_length`,
+  `Violation::NameLength`) and documents with more than 20 field-merge conflicts counted as the engine reports
+  them (`Violation::Conflicts`). An answer carries at most 20 errors, the rest replaced by one note
+  `Weitere Fehler ausgelassen.` (`SubgraphLimits::errors`). The default body limit is 16 KiB (was 64 KiB):
+  parsing a worst-case body of 64 KiB took about 75 ms of synchronous work.
 
 ## [0.6.0] - 2026-11-09
 

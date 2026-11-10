@@ -111,6 +111,31 @@ async fn the_key_is_checked_before_the_body_is_read() {
 }
 
 #[tokio::test]
+async fn the_body_limit_is_16_kib_by_default() {
+    let router = endpoint().router();
+    // JSON whitespace pads the same small request to the size under test.
+    let padded = |len: usize| {
+        let mut b = String::from(r#"{"query":"{ caller }""#);
+        b.push_str(&" ".repeat(len - b.len() - 1));
+        b.push('}');
+        assert_eq!(b.len(), len);
+        b
+    };
+    let (status, _, b) = send(&router, request(Some("good-key"), padded(16 * 1024))).await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(b["data"]["caller"], "router");
+    let (status, _, b) = send(&router, request(Some("good-key"), padded(16 * 1024 + 1))).await;
+    assert_eq!(status, StatusCode::PAYLOAD_TOO_LARGE);
+    assert_eq!(code(&b), "VALIDATION");
+    // The limit stays configurable.
+    let wide = endpoint()
+        .limits(SubgraphLimits::default().body(32 * 1024))
+        .router();
+    let (status, _, _) = send(&wide, request(Some("good-key"), padded(16 * 1024 + 1))).await;
+    assert_eq!(status, StatusCode::OK);
+}
+
+#[tokio::test]
 async fn the_brake_answers_429_after_the_failures_and_calls_the_hook() {
     let failed = Arc::new(AtomicUsize::new(0));
     let f = Arc::clone(&failed);

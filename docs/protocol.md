@@ -288,7 +288,8 @@ feed and the status endpoint of the app (§3.2).
 1. **Failure brake** (§3.2) – before anything else.
 2. **Key** – before the body is read, so a request without a valid key never buffers a body (a request
    without a key and with a body over the limit gets `401`, not `413`).
-3. **Body** – at most the body limit (default 64 KiB).
+3. **Body** – at most the body limit (default 16 KiB). Router fetches are small; parsing is synchronous work
+   that the deadline does not stop (a worst-case body of 64 KiB took about 75 ms on a 2.1 GHz core).
 4. **Request** – one JSON object in the GraphQL-over-HTTP form (`query`, optional `variables` and
    `operationName`). Batches (JSON arrays) are not accepted.
 5. **Bracket scan** (§4.2) of the raw query text, before it is parsed.
@@ -313,13 +314,17 @@ brackets are left to the parser. A block string `"""` without a closing `"""` is
 its opening quotes as an empty string followed by an ordinary one and parse the text after it, which the pass
 would have skipped. (The only documents this refuses are ones like `["""x"]`, a list of `""` and `"x"`.)
 
-The pre-check then runs on the parsed document and costs time linear in its size: each fragment is measured
-once. It exists because GraphQL engines walk fragment spreads by expanding them: a few fragments that each
+The pre-check then runs on the parsed document and costs time linear in its size (each fragment is measured
+once), except for the field-merge count, which costs what the engine's own walk costs and stays within the
+limits below. It exists because GraphQL engines walk fragment spreads by expanding them: a few fragments that each
 spread the next one twice expand to 2^n selections, and the engine's own depth and complexity checks would
 block a thread before execution starts. Engines also compare the arguments of fields with the same response
 name, quadratic in the number of arguments per field, so the arguments are bounded as well. And they convert
 the argument values of every field instance – once per spread of its fragment – so the argument values are
-counted through the expansion too.
+counted through the expansion too. Engines repeat names in their error messages, once per error, so names are
+short. And the rule for fields with the same response name runs once for every written selection set and walks
+the fragments spread there, so a fragment reached through a chain of fragments is walked once per fragment of
+the chain – its conflicts are counted the way the engine reports them.
 
 | Limit | Default | What counts |
 |---|---|---|
@@ -328,16 +333,21 @@ counted through the expansion too.
 | Arguments in total | 1 000 | Arguments written in the document (fields and directives, not expanded). |
 | Directives per location | 8 | Directives on one operation, variable definition, field, fragment definition, spread or inline fragment. |
 | Variable definitions | 50 | Variables declared by one operation. |
+| Name length | 256 | Bytes of each operation, field, alias, argument, directive, fragment and variable name (definitions and uses), each type condition and the named type of each variable definition. |
 | Fragment definitions | 30 | Fragment definitions in the document. |
 | Fragment spreads | 100 | Spreads `...Name` written in the document (not expanded). |
 | Expanded selections | 2 000 | Selections (fields, inline fragments, spreads) of all operations together, with every spread replaced by its fragment. |
 | Expanded argument values | 10 000 | Value nodes in the arguments of all fields and of the directives on fields, inline fragments and spreads, of all operations together, with every spread expanded. Each scalar, `null`, enum value, list and object counts 1, plus its entries. A variable counts the nodes of its value (from the request, else its declared default; the largest over the operations declaring it), because the engine copies the value into every field instance that uses it. |
 | Nesting | 32 | Levels of selection sets, the operation's own set being level 1; every field with a selection set, inline fragment and fragment spread opens a level (as the engine counts its recursion depth). At most 31 levels below the operation. |
+| Field-merge conflicts | 20 | For every written selection set (of operations, fields, inline fragments and fragment definitions): its fields together with those of its inline fragments and spreads (each fragment once), grouped by type condition and response name. Each later field of a group adds 1 if its field name differs from the group's first field, 1 if its argument count differs, and 1 for each argument of the first field it does not have with an equal value. The same number as the error limit (§4.5). |
 | `_entities` representations | 100 | Sum over all `_entities` fields of all operations. |
 
 Further rules:
 
-- **No fragment cycles**, also in fragments that no operation uses (the engine validates every definition).
+- **No fragment cycles.**
+- **No unused fragments:** every fragment definition must be reached from an operation through spreads. The
+  engine validates unused fragments as well, and they would be walked without counting toward the totals; this
+  way every fragment body counts through its spreads.
 - Spreads of unknown fragments are left to the engine's validation.
 - **Representations.** Every occurrence of `_entities` counts in full: each alias, each inline fragment and each
   spread of a fragment (also the same fragment spread twice), because the engine executes every occurrence
@@ -386,5 +396,7 @@ The messages name no limit and no detail; the server logs which limit was hit. E
 pre-check is the engine's answer (`200`, with `data` and/or `errors`). An error of the engine itself – one
 without a `path`, such as a validation, depth or complexity error – that has no `extensions.code` gets
 `extensions.code = "VALIDATION"`; errors of fields (with a `path`) and errors with a code are passed on
-unchanged. A failed storage read of a resolver should end with `extensions.code = "INTERNAL"` and the message
+unchanged. An answer carries at most 20 errors (the error limit): the first 20 are kept and the rest is replaced
+by one final error with `extensions.code = "VALIDATION"` and the message `Weitere Fehler ausgelassen.` This
+bounds the answer, not the engine's work – the pre-check does that. A failed storage read of a resolver should end with `extensions.code = "INTERNAL"` and the message
 `Interner Fehler. Bitte versuchen Sie es später erneut.`, never with the text of the storage error.

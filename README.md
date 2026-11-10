@@ -228,7 +228,7 @@ impl Query {
     }
 }
 
-let limits = SubgraphLimits::default(); // body 64 KiB, 100 representations, 1 000 reads, 3 at once, …
+let limits = SubgraphLimits::default(); // body 16 KiB, 100 representations, 1 000 reads, 3 at once, …
 let schema = limits
     .apply(Schema::build(Query, EmptyMutation, EmptySubscription)) // no introspection, `_service` kept
     .data(pool)

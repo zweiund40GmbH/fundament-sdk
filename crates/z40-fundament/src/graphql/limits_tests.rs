@@ -5,12 +5,14 @@ use super::*;
 #[test]
 fn defaults_follow_the_protocol() {
     let l = SubgraphLimits::default();
-    assert_eq!(l.max_body(), 65_536);
+    assert_eq!(l.max_body(), 16_384);
     assert_eq!(l.max_bracket_depth(), 64);
     assert_eq!(l.max_arguments(), 32);
     assert_eq!(l.max_total_arguments(), 1_000);
     assert_eq!(l.max_directives(), 8);
     assert_eq!(l.max_variables(), 50);
+    assert_eq!(l.max_name_length(), 256);
+    assert_eq!(l.max_errors(), 20);
     assert_eq!(l.max_duration(), Duration::from_secs(10));
     assert_eq!(l.max_fragments(), 30);
     assert_eq!(l.max_spreads(), 100);

@@ -1,8 +1,9 @@
 //! `POST /fundament/v1/graphql` as an axum router (`docs/protocol.md` §4). Order of the checks: brake
 //! (`429`) → subgraph key (`401`, counted) → body (`413` over the limit, `400` unreadable) → GraphQL request
 //! (`400`) → bracket scan, parsing and document pre-check (`400`) → execution by the app under the deadline
-//! (`200`, `503` on expiry). Other methods get `405`. Errors in GraphQL error shape with `extensions.code`;
-//! every answer carries `Cache-Control: no-store`.
+//! (`200`, `503` on expiry). Other methods get `405`. Errors in GraphQL error shape with `extensions.code`,
+//! at most [`SubgraphLimits::max_errors`] of the engine's per answer; every answer carries
+//! `Cache-Control: no-store`.
 
 use super::{ReadBudget, ReadLimiter, SubgraphLimits, Violation, precheck, scan_query};
 use crate::credentials::{FailureBrake, KeyList};
@@ -28,6 +29,8 @@ const MSG_INVALID: &str = "Ungültige Anfrage.";
 const MSG_TIMEOUT: &str = "Zeitüberschreitung.";
 /// Message of `413`.
 const MSG_TOO_LARGE: &str = "Anfrage zu groß.";
+/// Message of the note that replaces the errors beyond the error limit.
+const MSG_MORE_ERRORS: &str = "Weitere Fehler ausgelassen.";
 
 /// The name of the subgraph key a request was made with, in the request data of every request
 /// (`ctx.data::<SubgraphCaller>()`), e.g. for logs.
@@ -55,7 +58,8 @@ impl SubgraphCaller {
 /// pre-check never saw.
 ///
 /// **Engine errors** without a path (validation, depth, complexity) and without `extensions.code` get
-/// `extensions.code = "VALIDATION"`; field errors and errors with a code are passed on unchanged.
+/// `extensions.code = "VALIDATION"`; field errors and errors with a code are passed on unchanged. An answer
+/// carries at most [`SubgraphLimits::max_errors`] errors; the rest is replaced by one note.
 ///
 /// **Client address and brake.** As for [`crate::status::StatusEndpoint`]: serve the app with
 /// `into_make_service_with_connect_info::<SocketAddr>()`, or behind a reverse proxy pass
@@ -190,6 +194,7 @@ where
             return graphql_error(StatusCode::SERVICE_UNAVAILABLE, "TIMEOUT", MSG_TIMEOUT);
         };
         tag_engine_errors(&mut response);
+        limit_errors(&mut response, self.limits.max_errors());
         tracing::debug!(caller, reads = budget.reads(), "subgraph request");
         json_ok(response)
     }
@@ -229,6 +234,21 @@ fn tag_engine_errors(response: &mut async_graphql::Response) {
             ext.set("code", "VALIDATION");
         }
     }
+}
+
+/// Keeps the first `max` errors of `response`; if there were more, adds one note with
+/// `extensions.code = "VALIDATION"` instead of the rest. This bounds the answer, not the engine's work –
+/// the pre-check does that.
+fn limit_errors(response: &mut async_graphql::Response, max: usize) {
+    if response.errors.len() <= max {
+        return;
+    }
+    response.errors.truncate(max);
+    let mut note = async_graphql::ServerError::new(MSG_MORE_ERRORS, None);
+    note.extensions
+        .get_or_insert_with(Default::default)
+        .set("code", "VALIDATION");
+    response.errors.push(note);
 }
 
 /// `405` for every method but `POST`, with `Allow: POST`.

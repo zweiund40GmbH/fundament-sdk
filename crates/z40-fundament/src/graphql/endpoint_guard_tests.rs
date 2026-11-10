@@ -3,11 +3,20 @@
 
 use super::tests::{code, endpoint, request, send};
 use super::*;
+use serde_json::Value;
 use std::time::{Duration, Instant};
 
 /// A JSON request body for `query`.
 fn body(query: &str) -> String {
     serde_json::to_string(&json!({ "query": query })).unwrap()
+}
+
+/// The test endpoint with a body limit of 64 KiB (four times the default), for documents that only a
+/// larger limit lets through to the pre-check.
+fn wide_endpoint() -> Router {
+    endpoint()
+        .limits(SubgraphLimits::default().body(64 * 1024))
+        .router()
 }
 
 #[tokio::test]
@@ -65,7 +74,7 @@ async fn many_arguments_are_refused_within_milliseconds() {
     let b = body(&q);
     assert!(b.len() < 64 * 1024, "within the body limit: {}", b.len());
     let start = Instant::now();
-    let (status, _, b) = send(&endpoint().router(), request(Some("good-key"), b)).await;
+    let (status, _, b) = send(&wide_endpoint(), request(Some("good-key"), b)).await;
     assert_eq!(status, StatusCode::BAD_REQUEST);
     assert_eq!(code(&b), "VALIDATION");
     assert!(
@@ -88,7 +97,7 @@ async fn a_large_literal_spread_many_times_is_refused_quickly() {
     );
     let b = body(&q);
     assert!(b.len() < 64 * 1024, "within the body limit: {}", b.len());
-    let router = endpoint().router();
+    let router = wide_endpoint();
     let start = Instant::now();
     let (status, _, b) = send(&router, request(Some("good-key"), b)).await;
     let elapsed = start.elapsed();
@@ -146,4 +155,60 @@ fn a_code_already_set_is_kept() {
         ext.get("code"),
         Some(&async_graphql::Value::from("TOO_COMPLEX"))
     );
+}
+
+#[tokio::test]
+async fn the_field_merge_documents_are_400_within_milliseconds() {
+    // Without the pre-check: 0.8 s of synchronous work and an answer of 422 MB (unused fragments), a
+    // multiple with a long name, and about 2.4 s for the chain of used fragments.
+    let long = "n".repeat(10_000);
+    let router = wide_endpoint();
+    for q in [
+        crate::graphql::merge::tests::unused_fan("m"),
+        crate::graphql::merge::tests::unused_fan(&long),
+        crate::graphql::merge::tests::used_chain(),
+    ] {
+        let start = Instant::now();
+        let (status, _, b) = send(&router, request(Some("good-key"), body(&q))).await;
+        let elapsed = start.elapsed();
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert_eq!(code(&b), "VALIDATION");
+        let bound = if cfg!(debug_assertions) { 100 } else { 20 };
+        assert!(elapsed < Duration::from_millis(bound), "{elapsed:?}");
+    }
+}
+
+/// The errors of an answer to a query with `n` unknown fields, written directly or in a fragment.
+async fn errors_for(router: &Router, n: usize, in_fragment: bool) -> Vec<Value> {
+    let fields: String = (0..n).map(|i| format!("n{i} ")).collect();
+    let q = if in_fragment {
+        format!("{{ caller ...F }} fragment F on Query {{ {fields} }}")
+    } else {
+        format!("{{ caller {fields} }}")
+    };
+    let (status, _, b) = send(router, request(Some("good-key"), body(&q))).await;
+    assert_eq!(status, StatusCode::OK);
+    b["errors"].as_array().cloned().unwrap_or_default()
+}
+
+#[tokio::test]
+async fn an_answer_carries_at_most_the_error_limit_and_a_note() {
+    let router = endpoint().router();
+    for n in [1, 19, 20, 21, 57, 500] {
+        for in_fragment in [false, true] {
+            let errors = errors_for(&router, n, in_fragment).await;
+            assert_eq!(errors.len(), n.min(20) + usize::from(n > 20), "{n}");
+            assert!(
+                errors
+                    .iter()
+                    .all(|e| e["extensions"]["code"] == "VALIDATION")
+            );
+            let last = &errors[errors.len() - 1]["message"];
+            assert_eq!(last == "Weitere Fehler ausgelassen.", n > 20, "{n}: {last}");
+        }
+    }
+    let router = endpoint()
+        .limits(SubgraphLimits::default().errors(3))
+        .router();
+    assert_eq!(errors_for(&router, 10, false).await.len(), 4);
 }

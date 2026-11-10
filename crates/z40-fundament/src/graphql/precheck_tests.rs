@@ -68,9 +68,9 @@ fn cycles_are_rejected() {
     let mutual =
         "query { ...A } fragment A on Query { x: site { name } ...B } fragment B on Query { ...A }";
     assert_eq!(check(mutual), Err(Violation::Cycle));
-    // Also when no operation uses the cycle.
+    // A cycle no operation uses is rejected as unused.
     let unused = "{ site { name } } fragment A on Query { ...B } fragment B on Query { ...A }";
-    assert_eq!(check(unused), Err(Violation::Cycle));
+    assert_eq!(check(unused), Err(Violation::UnusedFragment));
 }
 
 #[test]
