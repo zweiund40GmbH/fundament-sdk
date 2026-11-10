@@ -8,8 +8,13 @@ use async_graphql::parser::types::Selection;
 use serde_json::json;
 use std::time::{Duration, Instant};
 
-/// The argument values of the first field of the first operation of `q`.
+/// The argument value nodes of the first field of the first operation of `q`.
 fn first_field(q: &str, vars: serde_json::Value) -> usize {
+    first_size(q, vars).nodes
+}
+
+/// The size of the argument values of the first field of the first operation of `q`.
+fn first_size(q: &str, vars: serde_json::Value) -> ValueSize {
     let doc = parse_query(q).unwrap();
     let vars = Variables::from_json(vars);
     let sizes = variable_sizes(&doc, &vars);
@@ -17,7 +22,7 @@ fn first_field(q: &str, vars: serde_json::Value) -> usize {
     let Selection::Field(f) = &op.node.selection_set.node.items[0].node else {
         panic!("not a field")
     };
-    argument_values(&f.node.arguments, &sizes) + directive_values(&f.node.directives, &sizes)
+    argument_values(&f.node.arguments, &sizes).plus(directive_values(&f.node.directives, &sizes))
 }
 
 #[test]
@@ -37,7 +42,7 @@ fn deep_values_are_counted_without_recursion() {
     let n = 100_000;
     let deep = InputValue::List(vec![]);
     let deep = (0..n).fold(deep, |v, _| InputValue::List(vec![v]));
-    assert_eq!(input_nodes(&deep, &HashMap::new()), n + 1);
+    assert_eq!(input_size(&deep, &HashMap::new()).nodes, n + 1);
     // Dropping the value would recurse as deep as it nests; leak it instead.
     std::mem::forget(deep);
 }

@@ -18,6 +18,7 @@ fn defaults_follow_the_protocol() {
     assert_eq!(l.max_spreads(), 100);
     assert_eq!(l.max_selections(), 2_000);
     assert_eq!(l.max_values(), 10_000);
+    assert_eq!(l.max_value_bytes(), 1_048_576);
     assert_eq!(l.max_nesting(), 32);
     assert_eq!(l.max_representations(), 100);
     assert_eq!(l.max_reads(), 1_000);

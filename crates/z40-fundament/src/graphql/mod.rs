@@ -8,10 +8,9 @@
 //!   **Use it on every async-graphql endpoint of the app**, not only here: deeply nested value literals
 //!   overflow the parser's stack and abort the process;
 //! * [`precheck`] – the document pre-check, linear in the size of the document except for the field-merge
-//!   count, which costs what the engine's own walk costs (arguments, directives,
-//!   variables, name length, fragment cycles and unused fragments, spreads, expansion, argument values,
-//!   nesting, field-merge conflicts, `_entities` representations), with [`Violation`] naming the broken
-//!   limit;
+//!   count, which costs what the engine's own walk costs (arguments, directives, variables, name length,
+//!   fragment cycles and unused fragments, spreads, expansion, argument values and their bytes, nesting,
+//!   field-merge conflicts, `_entities` representations), with [`Violation`] naming the broken limit;
 //! * [`SubgraphLimits`] – all limits with their defaults, and [`SubgraphLimits::apply`] for the engine
 //!   limits of the schema (depth, complexity, no introspection, `_service` kept);
 //! * [`ReadBudget`] and [`ReadLimiter`] – reads per request and concurrent reads per process, for the

@@ -109,6 +109,32 @@ async fn a_large_literal_spread_many_times_is_refused_quickly() {
 }
 
 #[tokio::test]
+async fn a_long_variable_used_at_many_instances_is_refused_quickly() {
+    // 10 aliases taking `$s` in a fragment spread 100 times, `$s` a 1 MB string: the engine would copy it
+    // at every one of the 1 000 instances, synchronously. An app may allow such a body for record inputs.
+    let aliases: Vec<String> = (0..10).map(|i| format!("a{i}: caller(a: $s)")).collect();
+    let q = format!(
+        "query($s: String) {{ {} }} fragment F on Query {{ {} }}",
+        "...F ".repeat(100),
+        aliases.join(" ")
+    );
+    let b =
+        serde_json::to_string(&json!({ "query": q, "variables": { "s": "x".repeat(1_000_000) } }))
+            .unwrap();
+    let router = endpoint()
+        .limits(SubgraphLimits::default().body(2 * 1024 * 1024))
+        .router();
+    let start = Instant::now();
+    let (status, _, b) = send(&router, request(Some("good-key"), b)).await;
+    let elapsed = start.elapsed();
+    assert_eq!(status, StatusCode::BAD_REQUEST);
+    assert_eq!(code(&b), "VALIDATION");
+    // Reading and decoding the 1 MB body dominate.
+    let bound = if cfg!(debug_assertions) { 300 } else { 50 };
+    assert!(elapsed < Duration::from_millis(bound), "{elapsed:?}");
+}
+
+#[tokio::test]
 async fn the_deadline_answers_503_and_frees_the_permits() {
     let ep = endpoint().limits(SubgraphLimits::default().timeout(Duration::from_millis(50)));
     let limiter = ep.read_limiter().clone();

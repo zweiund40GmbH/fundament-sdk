@@ -6,6 +6,17 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- `graphql`: the pre-check bounds the bytes of the argument values through the expansion
+  (`SubgraphLimits::value_bytes`, `max_value_bytes`, default 1 MiB; new `Violation::ValueBytes`; `docs/protocol.md`
+  §4.2, "Expanded value bytes"). The value-node limit counted a string as one node whatever its length, and
+  async-graphql copies a variable's value at every field instance that uses it – in validation, complexity and
+  execution. A 1 MB string variable used by 10 aliases in a fragment spread 100 times passed every limit and cost
+  about a thousand copies of it, synchronously, beyond the reach of the deadline. Strings, enum values, binary
+  values and object keys count their bytes, variables by their request value (else their declared default) at
+  every use, literals at every instance.
+
 ## [0.7.0] - 2026-11-10
 
 ### Added

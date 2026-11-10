@@ -23,8 +23,9 @@ use std::time::Duration;
 ///   lets through (the engine reports each conflict once for every selection set that reaches it);
 /// * **fragments, spreads, selections, nesting** – the engine expands fragments at every spread; these
 ///   keep every walk over the expanded document small ([`super::precheck`]);
-/// * **argument values** – the engine converts the argument values of every field instance, once per
-///   spread; counted through the expansion like the selections;
+/// * **argument values, value bytes** – the engine converts (and copies) the argument values of every field
+///   instance, once per spread, a variable's value at every use; their nodes and the bytes of their texts
+///   are counted through the expansion like the selections;
 /// * **representations** – each `_entities` representation costs reads, and the engine's complexity
 ///   counts the field only once, however many representations it gets;
 /// * **reads** – a hard cap at run time, because a representation can fan out into lists of any size;
@@ -47,6 +48,7 @@ pub struct SubgraphLimits {
     spreads: usize,
     selections: usize,
     values: usize,
+    value_bytes: usize,
     nesting: usize,
     representations: usize,
     reads: usize,
@@ -71,6 +73,7 @@ impl Default for SubgraphLimits {
             spreads: 100,
             selections: 2_000,
             values: 10_000,
+            value_bytes: 1024 * 1024,
             nesting: 32,
             representations: 100,
             reads: 1_000,
@@ -157,6 +160,16 @@ impl SubgraphLimits {
     /// together with every spread expanded (default 10 000). A variable counts the nodes of its value.
     pub fn values(mut self, n: usize) -> Self {
         self.values = n;
+        self
+    }
+
+    /// Most bytes of text in the arguments of fields and of directives on selections, of all operations
+    /// together with every spread expanded (default 1 MiB): strings, enum values, binary values and object
+    /// keys. A variable counts the bytes of its value at every use, because the engine copies it into every
+    /// field instance – enough for one record-sized variable used once, not for a large one used at hundreds
+    /// of instances.
+    pub fn value_bytes(mut self, bytes: usize) -> Self {
+        self.value_bytes = bytes;
         self
     }
 

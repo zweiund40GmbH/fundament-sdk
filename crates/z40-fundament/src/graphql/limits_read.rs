@@ -69,6 +69,11 @@ impl SubgraphLimits {
         self.values
     }
 
+    /// See [`SubgraphLimits::value_bytes`].
+    pub fn max_value_bytes(&self) -> usize {
+        self.value_bytes
+    }
+
     /// See [`SubgraphLimits::nesting`].
     pub fn max_nesting(&self) -> usize {
         self.nesting

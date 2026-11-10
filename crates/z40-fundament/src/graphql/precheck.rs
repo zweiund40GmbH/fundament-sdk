@@ -17,7 +17,7 @@
 use super::SubgraphLimits;
 use super::merge::check_conflicts;
 use super::representations::count_representations;
-use super::values::{argument_values, directive_values, variable_sizes};
+use super::values::{ValueSize, argument_values, directive_values, variable_sizes};
 use super::written::check_written;
 use async_graphql::Variables;
 use async_graphql::parser::types::{ExecutableDocument, Selection, SelectionSet};
@@ -73,6 +73,9 @@ pub enum Violation {
     /// More argument values after expansion than [`SubgraphLimits::max_values`].
     #[error("too many argument values after expanding fragments")]
     Values,
+    /// More bytes of argument values after expansion than [`SubgraphLimits::max_value_bytes`].
+    #[error("argument values too large after expanding fragments")]
+    ValueBytes,
     /// Nesting deeper than [`SubgraphLimits::max_nesting`] after expansion.
     #[error("selections nested too deep")]
     Nesting,
@@ -84,7 +87,7 @@ pub enum Violation {
 /// Checks `doc` with the request's `variables` against `limits` (`docs/protocol.md` §4.2). `Ok` means
 /// the written document has few enough spreads, arguments, directives and variables and only short names,
 /// is acyclic, uses every fragment and, with every spread expanded, is small and shallow enough with few
-/// enough argument values, has few enough field-merge conflicts and asks for at most the allowed number of
+/// and short enough argument values, has few enough field-merge conflicts and asks for at most the allowed number of
 /// representations. Run [`super::scan_query`] on the query text before parsing it.
 /// Spreads of unknown fragments are left to the engine's validation. Pure: no IO, nothing is cloned from
 /// `variables`.
@@ -108,7 +111,7 @@ pub fn precheck(
     for (_, op) in doc.operations.iter() {
         let size = m.set(&op.node.selection_set.node, 1)?;
         total.selections = total.selections.saturating_add(size.selections);
-        total.values = total.values.saturating_add(size.values);
+        total.values = total.values.plus(size.values);
         m.check(total)?;
     }
     // A fragment not measured through an operation is unused: the engine would walk it uncounted.
@@ -129,28 +132,28 @@ pub fn precheck(
     Ok(())
 }
 
-/// Size of an expanded selection set: its selections (recursively), the value nodes of their arguments
+/// Size of an expanded selection set: its selections (recursively), the size of their argument values
 /// and how many levels of selection sets it spans (1 for a set of leaf fields, 0 for no set).
 #[derive(Debug, Clone, Copy)]
 struct Size {
     selections: usize,
-    values: usize,
+    values: ValueSize,
     levels: usize,
 }
 
 /// No selection set below a leaf field (and an unknown fragment).
 const EMPTY: Size = Size {
     selections: 0,
-    values: 0,
+    values: ValueSize { nodes: 0, bytes: 0 },
     levels: 0,
 };
 
-/// One measurement of a document: the value nodes of its variables, fragments measured so far (memo) and
+/// One measurement of a document: the sizes of its variables, fragments measured so far (memo) and
 /// those being measured (cycles).
 struct Measure<'a> {
     doc: &'a ExecutableDocument,
     limits: &'a SubgraphLimits,
-    variables: HashMap<&'a str, usize>,
+    variables: HashMap<&'a str, ValueSize>,
     done: HashMap<&'a str, Size>,
     open: HashSet<&'a str>,
 }
@@ -161,8 +164,11 @@ impl<'a> Measure<'a> {
         if size.selections > self.limits.max_selections() {
             return Err(Violation::Selections);
         }
-        if size.values > self.limits.max_values() {
+        if size.values.nodes > self.limits.max_values() {
             return Err(Violation::Values);
+        }
+        if size.values.bytes > self.limits.max_value_bytes() {
+            return Err(Violation::ValueBytes);
         }
         Ok(())
     }
@@ -185,7 +191,7 @@ impl<'a> Measure<'a> {
             let (own, below) = match &item.node {
                 Selection::Field(f) => (
                     argument_values(&f.node.arguments, vars)
-                        .saturating_add(directive_values(&f.node.directives, vars)),
+                        .plus(directive_values(&f.node.directives, vars)),
                     self.below(&f.node.selection_set.node, level)?,
                 ),
                 Selection::InlineFragment(f) => (
@@ -201,7 +207,7 @@ impl<'a> Measure<'a> {
                 .selections
                 .saturating_add(1)
                 .saturating_add(below.selections);
-            size.values = size.values.saturating_add(own).saturating_add(below.values);
+            size.values = size.values.plus(own).plus(below.values);
             size.levels = size.levels.max(below.levels.saturating_add(1));
             self.check(size)?;
             if self.too_deep(level, size.levels) {
