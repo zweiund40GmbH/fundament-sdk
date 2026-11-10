@@ -1,7 +1,7 @@
 //! A property test of the bracket scan against the parser: for random documents with quotes, escapes,
-//! comments and brackets in and between their tokens, whenever the parser accepts a document, the scan sees at least as many brackets open
-//! at once as the parsed document nests. A scan that skipped text the parser reads (as with an unterminated
-//! block string) breaks this.
+//! comments and brackets in and between their tokens, whenever the parser accepts a document, the scan
+//! sees at least as many brackets open at once as the parsed document nests. A scan that skipped text the
+//! parser reads (as with an unterminated block string) breaks this.
 
 use super::*;
 use async_graphql::parser::parse_query;

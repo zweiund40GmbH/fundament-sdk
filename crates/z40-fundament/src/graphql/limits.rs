@@ -13,8 +13,9 @@ use std::time::Duration;
 /// * **bracket depth** – the parser builds nested values recursively; deep brackets would overflow the
 ///   stack ([`super::scan_query`]). Selection sets count too, so keep it at least the nesting limit plus the
 ///   depth of the argument values a client needs (defaults 64 = 32 + 32);
-/// * **arguments, directives, variables** – the engine compares the arguments of every pair of fields with
-///   the same response name, and walks directives and variables per location;
+/// * **arguments, directives, variables** – the engine compares the arguments of fields with the same
+///   response name, quadratic in the number of arguments per field, and walks directives and variables per
+///   location;
 /// * **fragments, spreads, selections, nesting** – the engine expands fragments at every spread; these
 ///   keep every walk over the expanded document small ([`super::precheck`]);
 /// * **argument values** – the engine converts the argument values of every field instance, once per

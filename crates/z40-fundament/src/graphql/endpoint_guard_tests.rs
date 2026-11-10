@@ -51,7 +51,8 @@ async fn assert_deep_is_rejected(router: &Router, n: usize) {
 #[tokio::test]
 async fn many_arguments_are_refused_within_milliseconds() {
     // Two fragments with the same field and its arguments in opposite order, spread in many sets: the
-    // engine would compare every pair of arguments of every pair of fields.
+    // engine compares the arguments of fields with the same response name, quadratic in the number of
+    // arguments per field.
     let n = 4_000;
     let args: Vec<String> = (0..n).map(|i| format!("a{i}:{}", i % 10)).collect();
     let reversed: Vec<String> = args.iter().rev().cloned().collect();

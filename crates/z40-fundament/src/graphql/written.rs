@@ -2,8 +2,8 @@
 //! spreads, arguments per field and directive and in total, directives per location and variable
 //! definitions per operation.
 //!
-//! The engine compares the arguments of every pair of fields with the same response name (quadratic in the
-//! arguments of a field) and walks directives per location; these counts keep that work small. One walk
+//! The engine compares the arguments of fields with the same response name, quadratic in the number of
+//! arguments per field, and walks directives per location; these counts keep that work small. One walk
 //! with an explicit stack (no recursion, however deep the document), stopping at the first broken limit.
 
 use super::{SubgraphLimits, Violation};
