@@ -1,11 +1,11 @@
-# Protocol: change feed and status (version 1)
+# Protocol: change feed, status and subgraph (version 1)
 
 > **Status:** published description of **version 1**. Changes that break existing consumers need a new
 > version (new paths `/fundament/v2/…`); additive changes (new optional fields) are allowed within version 1.
 
 This document describes how apps exchange records and report their health. One app **owns** a kind of record
 (the *source*); other apps keep a local copy (the *consumers*). The crate `z40-fundament` implements both
-sides of the feed and the status endpoint of this protocol.
+sides of the feed, the status endpoint and the checks of a federation subgraph (§4) of this protocol.
 
 Conventions: JSON bodies are UTF-8, times are UTC in RFC 3339 with seconds and `Z`
 (`2026-11-04T09:00:00Z`), field names are case-sensitive. Some field names and all human-readable texts of
@@ -262,3 +262,96 @@ A client (e.g. monitoring) reads the document leniently, so apps can add fields 
   the complete answer and reads at most 256 KiB. Its fixed texts are those of §3.1 (`nicht erreichbar`,
   `HTTP <status>`, `Antwort ungültig`, `Zeitüberschreitung`).
 - Texts are data from another app: shown encoded, never interpreted.
+
+## 4. Federation subgraph
+
+An app may serve a **read-only GraphQL subgraph** for a federation router (Apollo Federation v2). The router
+sends small entity fetches (`_entities`) and reads the schema (`_service { sdl }`); it does not pass `_entities`
+on to its own clients. The subgraph is a separate schema of the app, without mutations. The crate
+`z40-fundament` (feature `graphql`) implements the checks below; the app provides the schema.
+
+```
+POST /fundament/v1/graphql
+Authorization: Bearer <subgraph key>
+Content-Type: application/json
+
+{"query": "query($r: [_Any!]!) { _entities(representations: $r) { ... on Site { name } } }",
+ "variables": {"r": [{"__typename": "Site", "id": "s-1"}]}}
+```
+
+Only `POST`. The subgraph keys are a list of their own (the same `name=sha256hex` form as the feed and status
+keys); which callers get one is the app's choice. Failed attempts count at the **same failure brake** as the
+feed and the status endpoint of the app (§3.2).
+
+### 4.1 Order of the checks
+
+1. **Failure brake** (§3.2) – before anything else.
+2. **Key** – before the body is read, so a request without a valid key never buffers a body (a request
+   without a key and with a body over the limit gets `401`, not `413`).
+3. **Body** – at most the body limit (default 64 KiB).
+4. **Request** – one JSON object in the GraphQL-over-HTTP form (`query`, optional `variables` and
+   `operationName`). Batches (JSON arrays) are not accepted.
+5. **Document pre-check** (§4.2) on the parsed document, before the GraphQL engine validates it. A query that
+   does not parse is reported by the engine (`200` with `errors`).
+6. **Execution** with the engine limits (§4.3) and the read limits (§4.4).
+
+### 4.2 Document pre-check
+
+The pre-check runs on the parsed document and costs time linear in its size: each fragment is measured once.
+It exists because GraphQL engines walk fragment spreads by expanding them: a few fragments that each spread the
+next one twice expand to 2^n selections, and the engine's own depth and complexity checks would block a thread
+before execution starts.
+
+| Limit | Default | What counts |
+|---|---|---|
+| Fragment definitions | 30 | Fragment definitions in the document. |
+| Fragment spreads | 100 | Spreads `...Name` written in the document (not expanded). |
+| Expanded selections | 2 000 | Selections (fields, inline fragments, spreads) of all operations together, with every spread replaced by its fragment. |
+| Nesting | 32 | Levels of selection sets, the operation's own set being level 1; every field with a selection set, inline fragment and fragment spread opens a level (as the engine counts its recursion depth). At most 31 levels below the operation. |
+| `_entities` representations | 100 | Sum over all `_entities` fields of all operations. |
+
+Further rules:
+
+- **No fragment cycles**, also in fragments that no operation uses (the engine validates every definition).
+- Spreads of unknown fragments are left to the engine's validation.
+- **Representations.** Every occurrence of `_entities` counts in full: each alias, each inline fragment and each
+  spread of a fragment (also the same fragment spread twice), because the engine executes every occurrence
+  separately. The value of `representations` is the inline value, or the request variable, or – when the
+  request does not send the variable – its declared default value (the engine uses the default too), else
+  `null`. A list counts its entries (`[$a, $b]` counts 2), `null` counts 0, any other value 1 (list coercion).
+
+### 4.3 Engine limits
+
+- Query depth and complexity limited by the engine (the app chooses the values; defaults depth 10, complexity
+  1 000).
+- **No introspection:** `__schema` and `__type` answer `null`; `_service { sdl }` stays available for the
+  router.
+- No mutations and no subscriptions in the subgraph schema.
+
+### 4.4 Reads
+
+- **Read budget per request** (default 1 000): every storage read of the app's resolvers counts. The read
+  beyond the budget is not run; its field ends with an error with `extensions.code = "VALIDATION"` and the
+  message `Zu viele Lesezugriffe in einer Anfrage.` The answer is `200` with `errors`; the field becomes `null`
+  by the GraphQL rules, parts already read stay in `data`.
+- **Concurrent reads per process** (default 3): at most this many reads of all subgraph requests of the
+  process run at the same time, so subgraph traffic cannot take the connection pool from the app's own users.
+
+### 4.5 Errors
+
+Error bodies have the GraphQL error form and `Cache-Control: no-store`:
+
+```json
+{"errors": [{"message": "Anmeldung erforderlich.", "extensions": {"code": "UNAUTHENTICATED"}}]}
+```
+
+| Status | `extensions.code` | Message | When |
+|---|---|---|---|
+| `400` | `BAD_REQUEST` | `Ungültige Anfrage.` | The body is unreadable, not JSON, a batch or not a GraphQL request. |
+| `400` | `VALIDATION` | `Ungültige Anfrage.` | The document pre-check (§4.2) rejected the document. Nothing is executed. |
+| `401` | `UNAUTHENTICATED` | `Anmeldung erforderlich.` | Missing or wrong key. Header `WWW-Authenticate: Bearer`. |
+| `413` | `VALIDATION` | `Anfrage zu groß.` | The body is larger than the limit. |
+| `429` | `RATE_LIMITED` | `Zu viele Fehlversuche. Bitte warten Sie eine Minute.` | Failure brake (§3.2). Header `Retry-After: 60`. |
+
+The messages name no limit and no detail; the server logs which limit was hit. Everything after the
+pre-check is the engine's answer (`200`, with `data` and/or `errors`).
