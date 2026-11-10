@@ -320,8 +320,8 @@ limits below. It exists because GraphQL engines walk fragment spreads by expandi
 spread the next one twice expand to 2^n selections, and the engine's own depth and complexity checks would
 block a thread before execution starts. Engines also compare the arguments of fields with the same response
 name, quadratic in the number of arguments per field, so the arguments are bounded as well. And they convert
-the argument values of every field instance – once per spread of its fragment – so the argument values are
-counted through the expansion too. Engines repeat names in their error messages, once per error, so names are
+the argument values of every field instance – once per spread of its fragment, copying a variable's value at
+every use – so the argument values and the bytes of their texts are counted through the expansion too. Engines repeat names in their error messages, once per error, so names are
 short. And the rule for fields with the same response name runs once for every written selection set and walks
 the fragments spread there, so a fragment reached through a chain of fragments is walked once per fragment of
 the chain – its conflicts are counted the way the engine reports them.
@@ -338,6 +338,7 @@ the chain – its conflicts are counted the way the engine reports them.
 | Fragment spreads | 100 | Spreads `...Name` written in the document (not expanded). |
 | Expanded selections | 2 000 | Selections (fields, inline fragments, spreads) of all operations together, with every spread replaced by its fragment. |
 | Expanded argument values | 10 000 | Value nodes in the arguments of all fields and of the directives on fields, inline fragments and spreads, of all operations together, with every spread expanded. Each scalar, `null`, enum value, list and object counts 1, plus its entries. A variable counts the nodes of its value (from the request – also when no operation declares it, because the engine still validates the request value at every use – else its declared default; the largest over the operations declaring it), because the engine copies the value into every field instance that uses it. The engine also suggests similar field names for unknown fields; that cost grows with the number of fields of the parent type, so apps with very wide types should lower the body limit. |
+| Expanded value bytes | 1 MiB (1 048 576) | Bytes of the texts in the same argument values, counted through the same expansion: strings, enum values, binary values and object keys (also the keys of JSON variables); numbers, booleans and `null` count 0. A variable counts the bytes of its value at every use, as for the value nodes, because the engine copies the value into every field instance that uses it. One record-sized variable used once fits; a long string used at hundreds of instances does not. |
 | Nesting | 32 | Levels of selection sets, the operation's own set being level 1; every field with a selection set, inline fragment and fragment spread opens a level (as the engine counts its recursion depth). At most 31 levels below the operation. |
 | Field-merge conflicts | 20 | For every written selection set (of operations, fields, inline fragments and fragment definitions): its fields together with those of its inline fragments and spreads (each fragment once), grouped by type condition and response name. Each later field of a group adds 1 if its field name differs from the group's first field, 1 if its argument count differs, and 1 for each argument of the first field it does not have with an equal value. The same number as the error limit (§4.5). |
 | `_entities` representations | 100 | Sum over all `_entities` fields of all operations. |
