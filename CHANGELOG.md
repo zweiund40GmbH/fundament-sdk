@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-10
+
 ### Added
 
 - `z40-fundament`, new feature `graphql`: a read-only GraphQL federation subgraph `POST /fundament/v1/graphql`
@@ -292,7 +294,8 @@ All notable changes to this project are documented in this file. The format is b
 - `replica`: `Mapping`, `KeepFields`, `ReplicaStore`, `Replica` adapter.
 - `replica-mysql`: `MySqlStore` with configurable table prefix and `schema/mysql.sql`.
 
-[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.6.0...HEAD
+[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.7.0...HEAD
+[0.7.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.3.0...v0.4.0

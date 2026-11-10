@@ -3043,7 +3043,7 @@ dependencies = [
 
 [[package]]
 name = "z40-fundament"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "async-graphql",
  "async-graphql-value",
@@ -3065,7 +3065,7 @@ dependencies = [
 
 [[package]]
 name = "z40-fundament-http"
-version = "0.6.0"
+version = "0.7.0"
 dependencies = [
  "aws-lc-rs",
  "axum",
