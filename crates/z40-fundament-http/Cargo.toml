@@ -54,7 +54,7 @@ z40-auth = { version = "0.5.0", optional = true, features = ["axum"] }
 # `bff`: random session ids, SHA-256 and AES-256-GCM. Already the crypto backend of `z40-auth`, so no
 # second crypto library is built.
 aws-lc-rs = { version = "1.18.2", optional = true }
-base64 = { version = "0.22.1", optional = true }
+base64 = { version = "0.23.1", optional = true }
 chrono = { version = "0.4.42", optional = true, default-features = false, features = ["clock", "std"] }
 serde = { version = "1.0.219", optional = true, features = ["derive"] }
 # `bff`: the lazily discovered login client (`OnceCell`).
