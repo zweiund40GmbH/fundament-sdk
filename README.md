@@ -31,6 +31,7 @@ Ready-made MariaDB/MySQL implementations live behind their own feature. The seco
 | `feed-source` | Serving a feed: `FeedEndpoint` (axum router for `GET /fundament/v1/events`: key check, failure brake, `on_failed_attempt` hook, query rules, `hasMore`), the `FeedSourceStore` and `SourceStatusStore` traits, `assign_cursors_once` for the worker; with `status` also `source_status` (`angebote`, `abrufer`, failed attempts) |
 | `feed-source-mysql` | `MySqlSource`: sqlx/MariaDB outbox written in the app's transaction (also without a pool: `OutboxWriter`; `occurred_at` from the database clock unless set), database errors classified (deadlock and lock wait retryable), cursor assigner after commit (`GET_LOCK`), retention that keeps the newest state per record, poll log; schema in [`schema/mysql-source.sql`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/crates/z40-fundament/schema/mysql-source.sql) |
 | `graphql` | A read-only GraphQL federation subgraph with async-graphql: `SubgraphEndpoint` (axum router for `POST /fundament/v1/graphql`: failure brake, key check, body limit, deadline, errors in GraphQL shape), `scan_query` (bracket depth of the raw query, against parser stack overflows – for every async-graphql endpoint), `precheck` (arguments, directives, variables, fragment cycles, spreads, expansion, argument values and their bytes, nesting, `_entities` representations – linear in the document), `SubgraphLimits` (defaults, engine limits via `apply`), `ReadBudget` and `ReadLimiter` (reads per request, concurrent reads per process), `internal` (generic error for storage failures) |
+| `graphql-client` | `GraphqlClient`: sends fixed queries (`&'static str`) with `serde` variables to a router or subgraph with a service key (`Authorization: Bearer` only, redacted `Debug`); timeout, answer limit, no redirects, rustls; `query` (strict) and `execute` (keeps partial data); one error form `QueryError` (transport, timeout, HTTP status, GraphQL errors with `extensions.code`, decoding, too large) |
 | `test-util` | Helpers for your tests (`[dev-dependencies]`): `test_util::key(n)`, `FeedPageBuilder` (pages that pass the page rules), `status_document(app, level)` |
 
 Planned: caching and token credentials.
@@ -270,6 +271,31 @@ if scan_query(&request.query, &limits).is_err() {
 }
 let response = schema.execute(request).await;
 ```
+
+## Quick start: GraphQL client
+
+```toml
+[dependencies]
+z40-fundament = { version = "0.8", features = ["graphql-client"] }
+```
+
+```rust,ignore
+use z40_fundament::credentials::BearerKey;
+use z40_fundament::graphql_client::{GraphqlClient, QueryError};
+
+const SITE: &str = "query Site($id: ID!) { site(id: $id) { name } }"; // fixed text, never built from input
+
+let key = BearerKey::new(std::env::var("ROUTER_KEY")?)?;
+let client = GraphqlClient::new("https://router.example.com", key)?; // https only; path defaults to /fundament/v1/graphql
+let data: SiteData = client.query(SITE, &SiteVars { id: "42" }).await?; // SiteVars: Serialize, SiteData: Deserialize
+```
+
+Everything variable goes through the variables. The key travels only in the `Authorization` header, is
+never logged and is redacted in `Debug`; redirects are not followed. A query is bounded by a timeout
+(default 10 s) and the answer by a byte limit (default 1 MiB), both in `GraphqlClientOptions` together with the
+endpoint path of a router. `query` fails on any GraphQL error (`QueryError::Graphql`, with message and
+`extensions.code`, `has_code("VALIDATION")`); `execute` returns partial `data` and `errors` together. The
+texts of GraphQL errors come from the server: treat them as data.
 
 ## Documentation
 

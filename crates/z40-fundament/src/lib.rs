@@ -32,6 +32,8 @@
 //! * `graphql` → [`graphql`] – a read-only GraphQL federation subgraph: [`graphql::SubgraphEndpoint`]
 //!   (brake → key → body → document pre-check → execution), [`graphql::precheck`],
 //!   [`graphql::SubgraphLimits`] and the read limits [`graphql::ReadBudget`] / [`graphql::ReadLimiter`]
+//! * `graphql-client` → [`graphql_client`] – [`graphql_client::GraphqlClient`]: fixed queries with variables
+//!   against a router or subgraph with a service key (timeout, answer limit, one error form)
 //! * `test-util` → [`test_util`] – helpers for the tests of apps (keys, feed pages, status documents)
 #![cfg_attr(docsrs, feature(doc_cfg))]
 
@@ -52,10 +54,17 @@ pub mod fields;
 #[cfg(feature = "graphql")]
 #[cfg_attr(docsrs, doc(cfg(feature = "graphql")))]
 pub mod graphql;
+#[cfg(feature = "graphql-client")]
+#[cfg_attr(docsrs, doc(cfg(feature = "graphql-client")))]
+pub mod graphql_client;
 pub mod health;
 #[cfg(any(feature = "status", feature = "feed-source", feature = "graphql"))]
 mod http;
-#[cfg(any(feature = "feed-consumer", feature = "status-client"))]
+#[cfg(any(
+    feature = "feed-consumer",
+    feature = "status-client",
+    feature = "graphql-client"
+))]
 mod http_client;
 pub mod protocol;
 #[cfg(feature = "replica")]
