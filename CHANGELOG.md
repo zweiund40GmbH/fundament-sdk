@@ -6,16 +6,19 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+The next release is 0.8.0 (new feature).
+
 ### Added
 
 - `z40-fundament`, new feature `graphql-client`: `graphql_client::GraphqlClient` sends fixed GraphQL queries
   (`&'static str`) with `serde` variables to a router or subgraph with a service key and returns the typed `data`.
   `query` is strict (any GraphQL error fails, partial data is dropped), `execute` returns `GraphqlResponse` with
-  partial `data` and `errors`. The key travels only as `Authorization: Bearer` (`BearerKey`, redacted `Debug`, never
+  partial `data` and `errors`; an answer with neither `data` nor `errors` is a decoding error, variables must be a
+  JSON object or `null`. The output structs `GraphqlResponse` and `ResponseError` are `#[non_exhaustive]`. The key travels only as `Authorization: Bearer` (`BearerKey`, redacted `Debug`, never
   logged); the origin must be `https://`, redirects are not followed, a timeout (default 10 s) and an answer limit
   (default 1 MiB, `GraphqlClientOptions`) apply. One error form, `QueryError`: transport, timeout, HTTP status
   (with the GraphQL errors of a readable body), GraphQL errors (message and `extensions.code`, bounded to 20 errors
-  of 512 characters), decoding, answer too large. The feature uses the HTTP groundwork of the feed consumer and
+  of 512 characters, control characters removed), decoding, answer too large. The feature uses the HTTP groundwork of the feed consumer and
   the status client and adds no dependency.
 
 ## [0.7.1] - 2026-11-10

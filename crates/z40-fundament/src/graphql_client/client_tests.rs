@@ -79,3 +79,17 @@ fn errors_expose_codes() {
     assert_eq!(e.to_string(), "GraphQL server answered with HTTP 400");
     assert!(QueryError::Timeout.errors().is_empty());
 }
+
+#[test]
+fn only_objects_and_null_are_variables() {
+    let ok = |v: Value| matches!(v, Value::Null | Value::Object(_));
+    assert!(ok(serde_json::to_value(()).unwrap()));
+    assert!(ok(serde_json::json!({"a": 1})));
+    for bad in [
+        serde_json::json!([1]),
+        serde_json::json!("s"),
+        serde_json::json!(5),
+    ] {
+        assert!(!ok(bad));
+    }
+}

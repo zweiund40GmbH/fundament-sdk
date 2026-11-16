@@ -48,14 +48,20 @@ pub(crate) fn parse(body: &[u8]) -> Result<Parsed, ()> {
     })
 }
 
+/// `s` without control characters (so a server cannot inject line breaks or escape codes into logs
+/// or terminals), cut to `max` characters.
+fn clean(s: &str, max: usize) -> String {
+    s.chars().filter(|c| !c.is_control()).take(max).collect()
+}
+
 /// A bounded [`ResponseError`] from the raw entry.
 fn into_error(raw: RawError) -> ResponseError {
     let message = match raw.message {
-        Some(Value::String(s)) => s.chars().take(MAX_MESSAGE_CHARS).collect(),
+        Some(Value::String(s)) => clean(&s, MAX_MESSAGE_CHARS),
         _ => String::new(),
     };
     let code = match raw.extensions.as_ref().and_then(|e| e.get("code")) {
-        Some(Value::String(s)) => Some(s.chars().take(MAX_CODE_CHARS).collect()),
+        Some(Value::String(s)) => Some(clean(s, MAX_CODE_CHARS)),
         _ => None,
     };
     ResponseError { message, code }
@@ -96,6 +102,16 @@ mod tests {
         let p = parse(format!(r#"{{"errors":[{many}]}}"#).as_bytes()).unwrap();
         assert_eq!(p.errors.len(), MAX_ERRORS);
         assert_eq!(p.errors[0].message.chars().count(), MAX_MESSAGE_CHARS);
+    }
+
+    #[test]
+    fn control_characters_are_stripped() {
+        let p = parse(
+            br#"{"errors":[{"message":"a\u001b[31mb\nc\u0000","extensions":{"code":"X\tY"}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(p.errors[0].message, "a[31mbc");
+        assert_eq!(p.errors[0].code.as_deref(), Some("XY"));
     }
 
     #[test]

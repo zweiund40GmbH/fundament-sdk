@@ -3,11 +3,13 @@
 /// One error of the `errors` list of a GraphQL answer. It comes from the other app: treat the text as
 /// data (encode it for your output) and do not assume it is free of record contents.
 #[derive(Debug, Clone, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ResponseError {
-    /// The `message`, shortened to [`MAX_MESSAGE_CHARS`](crate::graphql_client::MAX_MESSAGE_CHARS)
-    /// characters; empty if the answer had none.
+    /// The `message` without control characters, shortened to
+    /// [`MAX_MESSAGE_CHARS`](crate::graphql_client::MAX_MESSAGE_CHARS) characters; empty if the answer
+    /// had none.
     pub message: String,
-    /// `extensions.code` (e.g. `VALIDATION`, `TIMEOUT`, `INTERNAL`) if it is a string.
+    /// `extensions.code` without control characters (e.g. `VALIDATION`, `TIMEOUT`, `INTERNAL`) if it is a string.
     pub code: Option<String>,
 }
 

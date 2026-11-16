@@ -251,3 +251,46 @@ async fn undecodable_answers() {
         assert_eq!(err, QueryError::Decode, "{body}");
     }
 }
+
+#[tokio::test]
+async fn answers_without_data_and_errors_are_undecodable() {
+    for body in [r#"{}"#, r#"{"errors":[]}"#, r#"{"data":null}"#] {
+        let (origin, _) = answering(StatusCode::OK, body).await;
+        let c = client(&origin, GraphqlClientOptions::default());
+        let e = c.query::<_, Option<Data>>(QUERY, &vars()).await;
+        assert_eq!(e.unwrap_err(), QueryError::Decode, "{body}");
+        let e = c.query::<_, ()>(QUERY, &vars()).await;
+        assert_eq!(e.unwrap_err(), QueryError::Decode, "{body}");
+    }
+}
+
+#[tokio::test]
+async fn variables_must_be_an_object_or_null() {
+    let (origin, seen) = answering(StatusCode::OK, r#"{"data":{"site":null}}"#).await;
+    let c = client(&origin, GraphqlClientOptions::default());
+    for bad in [json!([1]), json!("x"), json!(5)] {
+        let e = c.query::<_, Data>(QUERY, &bad).await;
+        assert_eq!(e.unwrap_err(), QueryError::Encode, "{bad}");
+    }
+    assert!(seen.lock().unwrap().body.is_none(), "nothing was sent");
+}
+
+#[tokio::test]
+async fn accept_header_prefers_graphql_response_json() {
+    let router = Router::new().route(
+        "/fundament/v1/graphql",
+        post(|headers: HeaderMap| async move {
+            let accept = headers.get(header::ACCEPT).unwrap().to_str().unwrap();
+            assert_eq!(
+                accept,
+                "application/graphql-response+json, application/json"
+            );
+            r#"{"data":{"site":null}}"#
+        }),
+    );
+    let origin = serve(router).await;
+    let r = client(&origin, GraphqlClientOptions::default())
+        .query::<_, Data>(QUERY, &vars())
+        .await;
+    assert!(r.is_ok());
+}

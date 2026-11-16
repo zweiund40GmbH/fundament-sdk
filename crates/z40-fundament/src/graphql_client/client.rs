@@ -43,6 +43,7 @@ impl Default for GraphqlClientOptions {
 
 /// The answer of [`GraphqlClient::execute`]: the typed `data` and the errors next to it.
 #[derive(Debug, Clone, PartialEq)]
+#[non_exhaustive]
 pub struct GraphqlResponse<T> {
     /// The `data` of the answer; `None` if it was missing or `null` (then `errors` is not empty).
     pub data: Option<T>,
@@ -136,8 +137,10 @@ impl GraphqlClient {
     /// Runs `query` with `variables` and returns its `data` as `T`.
     ///
     /// Strict: any entry in `errors` is [`QueryError::Graphql`], and a partial `data` next to it is
-    /// dropped. Use [`GraphqlClient::execute`] when partial results are useful. Pass `&()` for a query
-    /// without variables.
+    /// dropped. An answer without `data` (missing or `null`) and without errors is
+    /// [`QueryError::Decode`], also for `T = ()` or an `Option`. Use [`GraphqlClient::execute`] when
+    /// partial results are useful. `variables` must serialize to a JSON object or `null`, else
+    /// [`QueryError::Encode`]; pass `&()` for a query without variables.
     pub async fn query<V, T>(&self, query: &'static str, variables: &V) -> Result<T, QueryError>
     where
         V: Serialize + ?Sized,
@@ -149,7 +152,9 @@ impl GraphqlClient {
                 errors: parsed.errors,
             });
         }
-        decode(parsed.data).ok_or(QueryError::Decode)
+        // `data` missing or `null` without errors is not a valid answer (GraphQL spec).
+        let data = parsed.data.ok_or(QueryError::Decode)?;
+        serde_json::from_value(data).map_err(|_| QueryError::Decode)
     }
 
     /// Like [`GraphqlClient::query`], but keeps partial results: GraphQL errors do not fail the call,
@@ -181,6 +186,9 @@ impl GraphqlClient {
         variables: &V,
     ) -> Result<Parsed, QueryError> {
         let variables = serde_json::to_value(variables).map_err(|_| QueryError::Encode)?;
+        if !matches!(variables, Value::Null | Value::Object(_)) {
+            return Err(QueryError::Encode);
+        }
         let body = serde_json::to_vec(&RequestBody {
             query,
             variables: &variables,
@@ -190,7 +198,10 @@ impl GraphqlClient {
             .http
             .post(&self.url)
             .bearer_auth(self.key.expose())
-            .header(reqwest::header::ACCEPT, "application/json")
+            .header(
+                reqwest::header::ACCEPT,
+                "application/graphql-response+json, application/json",
+            )
             .header(reqwest::header::CONTENT_TYPE, "application/json")
             .body(body)
             .send()

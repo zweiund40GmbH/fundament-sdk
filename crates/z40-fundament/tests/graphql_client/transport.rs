@@ -47,6 +47,30 @@ async fn slow_answer_times_out() {
 }
 
 #[tokio::test]
+async fn stalled_body_times_out() {
+    // Headers arrive, the promised body never does: the overall timeout still applies.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let origin = format!("http://{}", listener.local_addr().unwrap());
+    tokio::spawn(async move {
+        let (mut socket, _) = listener.accept().await.unwrap();
+        let mut buf = [0u8; 4096];
+        let _ = socket.read(&mut buf).await;
+        let head = "HTTP/1.1 200 OK\r\nContent-Length: 100\r\n\r\n{\"data\":";
+        let _ = socket.write_all(head.as_bytes()).await;
+        tokio::time::sleep(Duration::from_secs(5)).await;
+    });
+    let options = GraphqlClientOptions {
+        timeout: Duration::from_millis(300),
+        ..GraphqlClientOptions::default()
+    };
+    let err = client(&origin, options)
+        .query::<_, Data>(QUERY, &vars())
+        .await
+        .unwrap_err();
+    assert_eq!(err, QueryError::Timeout);
+}
+
+#[tokio::test]
 async fn oversized_answer_is_refused() {
     let (origin, _) = answering(
         StatusCode::OK,
