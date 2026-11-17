@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-11-17
+
 ### Added
 
 - `graphql-client`: `GraphqlClient::plain_http_internal` – an explicit opt-in for a plain `http://host[:port]`
@@ -331,7 +333,8 @@ All notable changes to this project are documented in this file. The format is b
 - `replica`: `Mapping`, `KeepFields`, `ReplicaStore`, `Replica` adapter.
 - `replica-mysql`: `MySqlStore` with configurable table prefix and `schema/mysql.sql`.
 
-[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.7.0...v0.7.1
 [0.7.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.6.0...v0.7.0
