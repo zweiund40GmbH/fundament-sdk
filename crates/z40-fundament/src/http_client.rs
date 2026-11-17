@@ -32,6 +32,13 @@ pub(crate) fn https_origin(raw: &str) -> Option<String> {
     origin(raw, "https").map(|u| u.origin().ascii_serialization())
 }
 
+/// The plain `http://` origin of `raw` for any host, serialized without trailing slash. Only for clients
+/// that opted in to unencrypted HTTP on a private network.
+#[cfg(feature = "graphql-client")]
+pub(crate) fn http_origin(raw: &str) -> Option<String> {
+    origin(raw, "http").map(|u| u.origin().ascii_serialization())
+}
+
 /// The `http://` origin of `raw` if its host is a loopback address (tests only).
 pub(crate) fn loopback_http_origin(raw: &str) -> Option<String> {
     let u = origin(raw, "http")?;
@@ -141,5 +148,30 @@ mod tests {
         assert!(loopback_http_origin("http://crm.example.com").is_none());
         assert!(loopback_http_origin("https://127.0.0.1").is_none());
         assert!(https_origin("http://127.0.0.1").is_none());
+    }
+
+    #[cfg(feature = "graphql-client")]
+    #[test]
+    fn plain_http_any_host() {
+        assert_eq!(
+            http_origin("http://crm:8080/").as_deref(),
+            Some("http://crm:8080")
+        );
+        assert_eq!(
+            http_origin("http://crm.example.com").as_deref(),
+            Some("http://crm.example.com")
+        );
+        for bad in [
+            "https://crm.example.com",
+            "http://crm.example.com/graphql",
+            "http://user:pw@crm.example.com",
+            "http:///crm.example.com",
+            "http://crm.example.com?x=1",
+            "http://crm.example.com#x",
+            "http://",
+            "crm.example.com",
+        ] {
+            assert!(http_origin(bad).is_none(), "{bad}");
+        }
     }
 }

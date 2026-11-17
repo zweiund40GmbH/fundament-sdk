@@ -26,6 +26,38 @@ async fn redirects_are_not_followed() {
 }
 
 #[tokio::test]
+async fn plain_http_internal_sends_the_key_and_follows_no_redirect() {
+    // A redirect to another origin must not carry the key there.
+    let (target, seen) = answering(StatusCode::OK, r#"{"data":{"site":null}}"#).await;
+    let to = format!("{target}/fundament/v1/graphql");
+    let router = Router::new().route(
+        "/fundament/v1/graphql",
+        post(move || async move { Redirect::temporary(&to) }),
+    );
+    let origin = serve(router).await;
+    let key = BearerKey::new(KEY).unwrap();
+    let c =
+        GraphqlClient::plain_http_internal(&origin, key, GraphqlClientOptions::default()).unwrap();
+    let err = c.query::<_, Data>(QUERY, &vars()).await.unwrap_err();
+    assert_eq!(
+        err,
+        QueryError::Status {
+            status: 307,
+            errors: vec![]
+        }
+    );
+    assert!(seen.lock().unwrap().authorization.is_none());
+
+    let key = BearerKey::new(KEY).unwrap();
+    let c =
+        GraphqlClient::plain_http_internal(&target, key, GraphqlClientOptions::default()).unwrap();
+    let data: Data = c.query(QUERY, &vars()).await.unwrap();
+    assert_eq!(data.site, None);
+    let auth = seen.lock().unwrap().authorization.clone();
+    assert_eq!(auth.as_deref(), Some(&*format!("Bearer {KEY}")));
+}
+
+#[tokio::test]
 async fn slow_answer_times_out() {
     let router = Router::new().route(
         "/fundament/v1/graphql",

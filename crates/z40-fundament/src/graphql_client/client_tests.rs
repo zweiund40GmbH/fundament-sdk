@@ -56,6 +56,52 @@ fn test_origin_is_loopback_only() {
 }
 
 #[test]
+fn plain_http_internal_accepts_any_http_host() {
+    let o = GraphqlClientOptions::default;
+    let c = GraphqlClient::plain_http_internal("http://billing:8080/", key(), o()).unwrap();
+    let d = format!("{c:?}");
+    assert!(d.contains("http://billing:8080/fundament/v1/graphql"));
+    assert!(!d.contains("s3cr3t"));
+    let options = GraphqlClientOptions {
+        path: "/graphql".to_owned(),
+        ..o()
+    };
+    let c = GraphqlClient::plain_http_internal("http://10.0.0.7", key(), options).unwrap();
+    assert!(format!("{c:?}").contains("http://10.0.0.7/graphql"));
+    assert!(GraphqlClient::plain_http_internal("http://127.0.0.1:1", key(), o()).is_ok());
+}
+
+#[test]
+fn plain_http_internal_rejects_https_and_malformed_origins() {
+    let o = GraphqlClientOptions::default;
+    for bad in [
+        "https://router.example.com",
+        "http://router.example.com/graphql",
+        "http://user:pw@router.example.com",
+        "http://router.example.com?x=1",
+        "http://router.example.com#x",
+        "http:///router.example.com",
+        "router.example.com",
+        "",
+    ] {
+        assert_eq!(
+            GraphqlClient::plain_http_internal(bad, key(), o()).unwrap_err(),
+            ClientBuildError::InvalidUrl,
+            "{bad:?}"
+        );
+    }
+    let options = GraphqlClientOptions {
+        path: "//evil.example.com".to_owned(),
+        ..o()
+    };
+    assert_eq!(
+        GraphqlClient::plain_http_internal("http://router.example.com", key(), options)
+            .unwrap_err(),
+        ClientBuildError::InvalidPath
+    );
+}
+
+#[test]
 fn null_variables_are_left_out() {
     let none = serde_json::to_value(()).unwrap();
     let body = serde_json::to_string(&RequestBody {

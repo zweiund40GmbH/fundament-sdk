@@ -17,7 +17,9 @@ pub struct ResponseError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum ClientBuildError {
-    /// The origin is not `https://host[:port]` (or, for tests, a loopback `http://` origin).
+    /// The origin is not `https://host[:port]` (or, for
+    /// [`GraphqlClient::plain_http_internal`](super::GraphqlClient::plain_http_internal), an
+    /// `http://host[:port]` origin; for tests, a loopback `http://` origin).
     #[error("invalid GraphQL origin")]
     InvalidUrl,
     /// The path is not an absolute path of visible ASCII without query and fragment.

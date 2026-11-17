@@ -108,6 +108,31 @@ impl GraphqlClient {
         Self::build(&origin, key, options, false)
     }
 
+    /// **Deliberate exception:** like [`GraphqlClient::with_options`], but for a plain, unencrypted
+    /// `http://host[:port]` origin with any host (one trailing `/` allowed; no path, query, fragment or
+    /// user info).
+    ///
+    /// Use it only for an endpoint that is reachable solely on a private network, for example a
+    /// router on an internal container network that is never exposed (TLS ends at the edge in front
+    /// of it). The key travels **unencrypted**: anyone who can read that network can read and reuse
+    /// it. Never use it across the internet or a shared network. The default is `https://` through
+    /// [`GraphqlClient::new`] and [`GraphqlClient::with_options`].
+    ///
+    /// An `https://` origin is refused with [`ClientBuildError::InvalidUrl`]: use
+    /// [`GraphqlClient::with_options`] for it, so a plain-http client is always visible in the code.
+    /// Redirects are never followed, as with every client of this crate, so the key reaches no other
+    /// location. Building the client logs a warning with the URL.
+    pub fn plain_http_internal(
+        origin: &str,
+        key: BearerKey,
+        options: GraphqlClientOptions,
+    ) -> Result<Self, ClientBuildError> {
+        let origin = http_client::http_origin(origin).ok_or(ClientBuildError::InvalidUrl)?;
+        let client = Self::build(&origin, key, options, false)?;
+        tracing::warn!(url = %client.url, "graphql: plain http, the key travels unencrypted");
+        Ok(client)
+    }
+
     /// The client for a validated `origin`.
     fn build(
         origin: &str,

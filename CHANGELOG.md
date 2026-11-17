@@ -6,6 +6,15 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- `graphql-client`: `GraphqlClient::plain_http_internal` – an explicit opt-in for a plain `http://host[:port]`
+  origin with any host, for an endpoint reachable only on a private network (e.g. a router that is never exposed;
+  TLS ends at the edge). The key travels unencrypted there. The origin is validated like the `https://` one
+  (no path, query, fragment or user info), `https://` origins are refused (use `with_options`), redirects are
+  not followed, and building the client logs a warning. `new`/`with_options` stay `https://` only;
+  `plain_http_for_tests` is unchanged.
+
 ## [0.8.0] - 2026-11-16
 
 ### Added

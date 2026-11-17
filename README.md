@@ -297,6 +297,11 @@ endpoint path of a router. `query` fails on any GraphQL error (`QueryError::Grap
 `extensions.code`, `has_code("VALIDATION")`); `execute` returns partial `data` and `errors` together. The
 texts of GraphQL errors come from the server: treat them as data.
 
+Plain `http://` is a deliberate exception: `GraphqlClient::plain_http_internal(origin, key, options)` accepts an
+`http://host[:port]` origin for an endpoint that is reachable only on a private network (for example a router
+that is never exposed, with TLS ending at the edge). The key then travels unencrypted, so never use it across
+the internet or a shared network; it refuses `https://` origins and logs a warning when the client is built.
+
 ## Documentation
 
 - [`docs/protocol.md`](https://github.com/zweiund40GmbH/fundament-sdk/blob/main/docs/protocol.md) – the feed, status and subgraph protocol (version 1)

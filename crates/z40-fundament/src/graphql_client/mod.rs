@@ -13,6 +13,9 @@
 //! * The key ([`BearerKey`](crate::credentials::BearerKey)) travels only in `Authorization: Bearer`, is
 //!   redacted in `Debug` and never logged. The origin must be `https://` (like the feed consumer and the
 //!   status client); redirects are never followed, so the key never reaches another location.
+//! * Plain `http://` is a deliberate, explicit exception: [`GraphqlClient::plain_http_internal`] for an
+//!   endpoint reachable only on a private network (e.g. a router that is never exposed). The key then
+//!   travels unencrypted; it is never a default and is logged as a warning when the client is built.
 //! * The whole request is bounded by a timeout and the answer by a byte limit (announced or sent).
 //! * Errors carry no key and no raw body. GraphQL errors are parsed and bounded
 //!   ([`MAX_ERRORS`] entries of [`MAX_MESSAGE_CHARS`] characters); their texts come from the server and
