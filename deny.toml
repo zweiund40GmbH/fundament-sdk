@@ -13,6 +13,9 @@ ignore = [
     # password with the server's public key (caching_sha2_password without TLS). The attack needs
     # private-key operations on our side, which never happen.
     { id = "RUSTSEC-2023-0071", reason = "sqlx-mysql uses public-key encryption only; no private-key operations." },
+    # chrono is unmaintained (no vulnerability). sqlx 0.9 needs it for its date/time types and the public API
+    # exposes chrono types; replacing it with `time` or `jiff` is a breaking change tracked as an issue.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, no vulnerability; required by sqlx, replacement tracked." },
 ]
 
 [licenses]
