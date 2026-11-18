@@ -6,7 +6,17 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
-## [0.8.1] - 2026-11-17
+## [0.8.2] - 2026-11-18
+
+Same library code as 0.8.1. The 0.8.1 tag was never published to crates.io because the release check failed on a
+new advisory (RUSTSEC-2026-0543, chrono unmaintained).
+
+### Changed
+
+- `deny.toml`: RUSTSEC-2026-0543 is ignored with a reason. chrono has no known vulnerability and is required by
+  sqlx; moving to another date/time crate is a breaking change for a later release.
+
+## [0.8.1] - 2026-11-17 [not published]
 
 ### Added
 
@@ -333,7 +343,8 @@ All notable changes to this project are documented in this file. The format is b
 - `replica`: `Mapping`, `KeepFields`, `ReplicaStore`, `Replica` adapter.
 - `replica-mysql`: `MySqlStore` with configurable table prefix and `schema/mysql.sql`.
 
-[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.8.1...HEAD
+[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.8.2...HEAD
+[0.8.2]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.7.1...v0.8.0
 [0.7.1]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.7.0...v0.7.1
