@@ -6,6 +6,8 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+## [0.8.3] - 2026-11-20
+
 ### Added
 
 - `graphql-client`: `ResponseError::fields` – the string entries of `extensions.fields` (field path → message),
@@ -350,7 +352,8 @@ new advisory (RUSTSEC-2026-0543, chrono unmaintained).
 - `replica`: `Mapping`, `KeepFields`, `ReplicaStore`, `Replica` adapter.
 - `replica-mysql`: `MySqlStore` with configurable table prefix and `schema/mysql.sql`.
 
-[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.8.2...HEAD
+[Unreleased]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.8.3...HEAD
+[0.8.3]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.8.2...v0.8.3
 [0.8.2]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.8.1...v0.8.2
 [0.8.1]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/zweiund40GmbH/fundament-sdk/compare/v0.7.1...v0.8.0
