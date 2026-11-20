@@ -119,6 +119,7 @@ fn errors_expose_codes() {
         errors: vec![ResponseError {
             message: "m".into(),
             code: Some("VALIDATION".into()),
+            fields: vec![("name".into(), "Bitte ausfüllen.".into())],
         }],
     };
     assert!(e.has_code("VALIDATION") && !e.has_code("TIMEOUT"));

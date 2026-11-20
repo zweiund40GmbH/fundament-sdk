@@ -4,7 +4,7 @@
 //!   (strict) and [`GraphqlClient::execute`] (keeps partial data)
 //! * [`GraphqlClientOptions`] – timeout (default 10 s), answer limit (default 1 MiB), endpoint path
 //! * [`QueryError`] – the one error form: transport, timeout, HTTP status, GraphQL errors, decoding, size
-//! * [`ResponseError`] – a GraphQL error with its message and `extensions.code`
+//! * [`ResponseError`] – a GraphQL error with its message, `extensions.code` and `extensions.fields`
 //!
 //! Safety properties:
 //!
@@ -18,7 +18,8 @@
 //!   travels unencrypted; it is never a default and is logged as a warning when the client is built.
 //! * The whole request is bounded by a timeout and the answer by a byte limit (announced or sent).
 //! * Errors carry no key and no raw body. GraphQL errors are parsed and bounded
-//!   ([`MAX_ERRORS`] entries of [`MAX_MESSAGE_CHARS`] characters); their texts come from the server and
+//!   ([`MAX_ERRORS`] entries of [`MAX_MESSAGE_CHARS`] characters, at most [`MAX_FIELDS`] field messages
+//!   from `extensions.fields` with paths of [`MAX_FIELD_PATH_CHARS`]); their texts come from the server and
 //!   are data, not something to put into a log line unchecked.
 //!
 //! **Partial data.** A GraphQL answer may carry `data` and `errors` together (a nullable field failed).
@@ -71,4 +72,4 @@ pub use client::{
     GraphqlResponse,
 };
 pub use error::{ClientBuildError, QueryError, ResponseError};
-pub use response::{MAX_ERRORS, MAX_MESSAGE_CHARS};
+pub use response::{MAX_ERRORS, MAX_FIELD_PATH_CHARS, MAX_FIELDS, MAX_MESSAGE_CHARS};
