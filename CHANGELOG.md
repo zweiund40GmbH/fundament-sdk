@@ -6,6 +6,13 @@ All notable changes to this project are documented in this file. The format is b
 
 ## [Unreleased]
 
+### Added
+
+- `graphql-client`: `ResponseError::fields` – the string entries of `extensions.fields` (field path → message),
+  sorted by path, without control characters and bounded (`MAX_FIELDS` entries, paths cut to
+  `MAX_FIELD_PATH_CHARS`, messages to `MAX_MESSAGE_CHARS`). Servers that report validation errors per field
+  can now pass them on to callers (#15). `ResponseError` is `#[non_exhaustive]`, so this is additive.
+
 ## [0.8.2] - 2026-11-18
 
 Same library code as 0.8.1. The 0.8.1 tag was never published to crates.io because the release check failed on a

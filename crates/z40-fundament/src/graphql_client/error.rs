@@ -11,6 +11,13 @@ pub struct ResponseError {
     pub message: String,
     /// `extensions.code` without control characters (e.g. `VALIDATION`, `TIMEOUT`, `INTERNAL`) if it is a string.
     pub code: Option<String>,
+    /// `extensions.fields` if it is an object: field path → message, for each entry whose value is a
+    /// string, without control characters, sorted by path, each path once (after cleaning; empty paths
+    /// are dropped) and bounded (at most
+    /// [`MAX_FIELDS`](crate::graphql_client::MAX_FIELDS) entries, paths cut to
+    /// [`MAX_FIELD_PATH_CHARS`](crate::graphql_client::MAX_FIELD_PATH_CHARS), messages to
+    /// [`MAX_MESSAGE_CHARS`](crate::graphql_client::MAX_MESSAGE_CHARS) characters); empty otherwise.
+    pub fields: Vec<(String, String)>,
 }
 
 /// Why a [`GraphqlClient`](super::GraphqlClient) could not be built.

@@ -10,6 +10,10 @@ pub const MAX_ERRORS: usize = 20;
 pub const MAX_MESSAGE_CHARS: usize = 512;
 /// Longest kept `extensions.code` in characters.
 const MAX_CODE_CHARS: usize = 128;
+/// Most kept entries of `extensions.fields`; the rest is dropped.
+pub const MAX_FIELDS: usize = 50;
+/// Longest kept field path of `extensions.fields` in characters.
+pub const MAX_FIELD_PATH_CHARS: usize = 128;
 
 /// The envelope of an answer; everything else in it is ignored.
 #[derive(Deserialize)]
@@ -64,7 +68,37 @@ fn into_error(raw: RawError) -> ResponseError {
         Some(Value::String(s)) => Some(clean(s, MAX_CODE_CHARS)),
         _ => None,
     };
-    ResponseError { message, code }
+    let fields = fields(raw.extensions.as_ref().and_then(|e| e.get("fields")));
+    ResponseError {
+        message,
+        code,
+        fields,
+    }
+}
+
+/// The bounded string entries of an `extensions.fields` object, sorted by path, with unique non-empty
+/// paths; empty for anything else.
+fn fields(value: Option<&Value>) -> Vec<(String, String)> {
+    let Some(Value::Object(map)) = value else {
+        return Vec::new();
+    };
+    let mut out: Vec<(String, String)> = map
+        .iter()
+        .filter_map(|(path, msg)| match msg {
+            Value::String(m) => Some((
+                clean(path, MAX_FIELD_PATH_CHARS),
+                clean(m, MAX_MESSAGE_CHARS),
+            )),
+            _ => None,
+        })
+        .collect();
+    // Sorted explicitly: the map order depends on serde_json's `preserve_order` feature.
+    out.sort();
+    // Cleaning can make paths empty or equal ("a" and "a\u{7}"); keep the first of each, drop empty ones.
+    out.retain(|(path, _)| !path.is_empty());
+    out.dedup_by(|b, a| a.0 == b.0);
+    out.truncate(MAX_FIELDS);
+    out
 }
 
 #[cfg(test)]
@@ -112,6 +146,55 @@ mod tests {
         .unwrap();
         assert_eq!(p.errors[0].message, "a[31mbc");
         assert_eq!(p.errors[0].code.as_deref(), Some("XY"));
+    }
+
+    #[test]
+    fn fields_are_kept_sorted_cleaned_and_bounded() {
+        let p = parse(
+            br#"{"errors":[{"message":"m","extensions":{"code":"VALIDATION",
+                "fields":{"z":"Zz","a.0":"A\nb","n":5}}},
+                {"extensions":{"fields":"odd"}},{"extensions":{"fields":["x"]}}]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            p.errors[0].fields,
+            vec![("a.0".into(), "Ab".into()), ("z".into(), "Zz".into())]
+        );
+        assert!(p.errors[1].fields.is_empty() && p.errors[2].fields.is_empty());
+
+        let many: Vec<String> = (0..MAX_FIELDS + 5)
+            .map(|i| format!(r#""f{i:03}":"m""#))
+            .collect();
+        let long = "p".repeat(MAX_FIELD_PATH_CHARS + 10);
+        let body = format!(
+            r#"{{"errors":[{{"extensions":{{"fields":{{{}}}}}}},{{"extensions":{{"fields":{{"{long}":"m"}}}}}}]}}"#,
+            many.join(",")
+        );
+        let p = parse(body.as_bytes()).unwrap();
+        assert_eq!(p.errors[0].fields.len(), MAX_FIELDS);
+        assert_eq!(p.errors[0].fields[0].0, "f000");
+        assert_eq!(
+            p.errors[0].fields[MAX_FIELDS - 1].0,
+            format!("f{:03}", MAX_FIELDS - 1)
+        );
+        assert_eq!(
+            p.errors[1].fields[0].0.chars().count(),
+            MAX_FIELD_PATH_CHARS
+        );
+    }
+
+    #[test]
+    fn field_paths_are_cleaned_unique_and_messages_cut() {
+        let long = "ü".repeat(MAX_MESSAGE_CHARS + 3);
+        let body = format!(
+            r#"{{"errors":[{{"extensions":{{"fields":{{"a":"1","a\u0007":"2","\n":"3","b\tc":"{long}"}}}}}}]}}"#
+        );
+        let p = parse(body.as_bytes()).unwrap();
+        let f = &p.errors[0].fields;
+        assert_eq!(f.len(), 2);
+        assert_eq!(f[0], ("a".into(), "1".into()));
+        assert_eq!(f[1].0, "bc");
+        assert_eq!(f[1].1.chars().count(), MAX_MESSAGE_CHARS);
     }
 
     #[test]
